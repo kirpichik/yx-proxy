@@ -7,8 +7,9 @@ CFLAGS=-c -Wall -std=gnu99 $(INCLUDES) -D_REENTRANT
 LDFLAGS=-lm -lpthread
 
 # Sources
-SOURCES=main.c
-HEADERS=
+SOURCES=main.c\
+				cache.c
+HEADERS=cache.h
 
 # Compiler output
 OBJECTS=$(SOURCES:.c=.o)
