@@ -7,6 +7,10 @@
 #define HTTP_VERSION_1_0 0
 #define HTTP_VERSION_1_1 1
 
+#ifndef HTTP_VERSION_DEFAULT
+#define HTTP_VERSION_DEFAULT HTTP_VERSION_1_0
+#endif
+
 #define HTTP_BUFFER_SIZE 1024
 
 typedef struct http_handler {
@@ -41,7 +45,7 @@ typedef struct header_line {
 void http_init_handler(int socket, http_handler_t* result);
 
 /**
- * Inits client initial line with method and default HTTP/1.0 protocol version.
+ * Inits client initial line with method and default HTTP protocol version.
  * Also dups uri to result struct.
  *
  * @param method Requested method.
@@ -53,7 +57,7 @@ void http_init_handler(int socket, http_handler_t* result);
 bool http_init_client_initial_line(char method, char* uri, client_initial_line_t* result);
 
 /**
- * Inits server initial line with status and default HTTP/1.0 protocol version.
+ * Inits server initial line with status and default HTTP protocol version.
  *
  * @param status Result status.
  * @param result Result struct.
@@ -143,4 +147,18 @@ bool http_write_header_line(http_handler_t* handler, header_line_t* output);
  * @return {@code true} if success.
  */
 bool http_write_body_begin(http_handler_t* handler);
+
+/**
+ * Free header key and value strings.
+ *
+ * @param data Target struct.
+ */
+void http_free_header_line(header_line_t* data);
+
+/**
+ * Free client initial line URI string.
+ *
+ * @param data Target struct.
+ */
+void http_free_client_initial_line(client_initial_line_t* data);
 
