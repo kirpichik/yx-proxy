@@ -8,8 +8,8 @@ LDFLAGS=-lm -lpthread
 
 # Sources
 SOURCES=main.c\
-				cache.c
-HEADERS=cache.h
+				http-handler.c
+HEADERS=http-handler.h
 
 # Compiler output
 OBJECTS=$(SOURCES:.c=.o)

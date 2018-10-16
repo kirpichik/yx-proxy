@@ -1,14 +1,14 @@
 
 #include <stdbool.h>
 
-typename struct cache_entry_struct {
+typedef struct cache_entry_struct {
   struct cache_entry_struct* next;
   char* path;
   char* mime_type;
   char* data;
 } cache_entry_t;
 
-typename struct cache_struct {
+typedef struct cache_struct {
 
 } cache_t;
 
