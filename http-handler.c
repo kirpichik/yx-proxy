@@ -8,7 +8,23 @@
 
 #include "http-handler.h"
 
+#define CHECK_ERROR(value, msg, ret) if (value) { perror(msg); return ret; }
+#define CHECK_ERROR_INT(value, msg) CHECK_ERROR(value, msg, -1)
+#define CHECK_ERROR_PTR(value, msg) CHECK_ERROR(value, msg, NULL)
+#define CHECK_ERROR_BOOL(value, msg) CHECK_ERROR(value, msg, false)
+
+#define CHECK_NULL(target, msg, ret) CHECK_ERROR(target == NULL, msg, ret)
+#define CHECK_NULL_INT(target, msg) CHECK_NULL(target, msg, -1)
+#define CHECK_NULL_PTR(target, msg) CHECK_NULL(target, msg, NULL)
+#define CHECK_NULL_BOOL(target, msg) CHECK_NULL(target, msg, false)
+
+#define CHECK_POSITIVE(target, msg, ret) CHECK_ERROR(target < 0, msg, ret)
+#define CHECK_POSITIVE_INT(target, msg) CHECK_POSITIVE(target, msg, -1)
+#define CHECK_POSITIVE_PTR(target, msg) CHECK_POSITIVE(target, msg, NULL)
+#define CHECK_POSITIVE_BOOL(target, msg) CHECK_POSITIVE(target, msg, false)
+
 #define LINE_DELIMITER "\r\n"
+#define LINE_DELIM_LEN (sizeof(LINE_DELIMITER) - 1)
 #define HEADER_DELIMITER ":"
 
 static bool send_data(int socket, char* data, size_t data_len) {
@@ -25,7 +41,7 @@ static bool send_data(int socket, char* data, size_t data_len) {
 }
 
 static bool send_newline(int socket) {
-  return send_data(socket, LINE_DELIMITER, sizeof(LINE_DELIMITER) - 1);
+  return send_data(socket, LINE_DELIMITER, LINE_DELIM_LEN);
 }
 
 static bool send_space(int socket) {
@@ -48,6 +64,65 @@ static char* get_method_name(int method) {
       return "GET";
   }
   return "";
+}
+
+static ssize_t strstrn(char* haystack, size_t haystack_len, char* needle, size_t needle_len) {
+  if (haystack_len < needle_len || haystack == NULL || needle == NULL)
+    return -1;
+
+  for (size_t i = 0; i < haystack_len - needle_len + 1; i++) {
+    bool found = true;
+    for (size_t j = 0; j < needle_len; j++)
+      if (haystack[i] != needle[j]) {
+        found = false;
+        break;
+      }
+
+    if (found)
+      return i;
+  }
+
+  return -1;
+}
+
+static char* recv_line(http_handler_t* handler, size_t* result_len) {
+  ssize_t recv_len;
+  size_t offset = 0;
+  size_t len = 0;
+  char* result = NULL;
+  // TODO - search in previous stored buffer
+
+  while ((recv_len = recv(handler->socket, handler->buffer, HTTP_BUFFER_SIZE, 0)) > 0) {
+    size_t size = offset + recv_len;
+    if (size > len) {
+      result = (char*) realloc(result, len += HTTP_BUFFER_SIZE);
+      CHECK_NULL_PTR(result, "Cannot receive HTTP line");
+    }
+    memcpy(result + offset, handler->buffer, recv_len);
+
+    size_t backward = LINE_DELIM_LEN <= offset ? offset - LINE_DELIM_LEN : 0;
+    size_t scan_len = backward + recv_len;
+
+    ssize_t pos = strstrn(result + offset - backward, scan_len, LINE_DELIMITER, LINE_DELIM_LEN);
+    if (pos != -1) {
+      size_t end_pos = pos + offset - backward;
+      if (end_pos != len) {
+        result = (char*) realloc(result, end_pos);
+        CHECK_NULL_PTR(result, "Cannot receive HTTP line");
+      }
+
+      // TODO - store handler buffer offsets
+
+      (*result_len) = end_pos;
+      return result;
+    }
+
+    offset += recv_len;
+  }
+
+  if (result != null)
+    free(result);
+  return NULL;
 }
 
 void http_init_handler(int socket, http_handler_t* result) {
