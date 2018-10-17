@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifndef _HTTP_HANDLER_H
+#define _HTTP_HANDLER_H
+
 #define HTTP_METHOD_GET 0
 
 #define HTTP_VERSION_1_0 0
@@ -161,4 +164,6 @@ void http_free_header_line(header_line_t* data);
  * @param data Target struct.
  */
 void http_free_client_initial_line(client_initial_line_t* data);
+
+#endif
 
