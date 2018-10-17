@@ -106,7 +106,7 @@ static char* recv_line(http_handler_t* handler, size_t* result_len) {
     offset += recv_len;
   }
 
-  if (result != null)
+  if (result != NULL)
     free(result);
   return NULL;
 }
