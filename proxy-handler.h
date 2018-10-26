@@ -7,4 +7,3 @@
 int proxy_loop();
 
 #endif
-

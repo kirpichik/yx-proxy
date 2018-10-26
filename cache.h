@@ -12,7 +12,6 @@ typedef struct cache_entry_struct {
 } cache_entry_t;
 
 typedef struct cache_struct {
-
 } cache_t;
 
 bool cache_init(cache_t* cache);
@@ -26,4 +25,3 @@ bool cache_entry_init(cache_entry_t* entry, char* path, char* mime_type);
 void cache_entry_free(cache_entry_t* entry);
 
 #endif
-

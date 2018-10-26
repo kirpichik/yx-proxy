@@ -2,7 +2,11 @@
 #ifndef _PROXY_UTILS_H
 #define _PROXY_UTILS_H
 
-#define CHECK_ERROR(value, msg, ret) if (value) { perror(msg); return ret; }
+#define CHECK_ERROR(value, msg, ret) \
+  if (value) {                       \
+    perror(msg);                     \
+    return ret;                      \
+  }
 #define CHECK_ERROR_INT(value, msg) CHECK_ERROR(value, msg, -1)
 #define CHECK_ERROR_PTR(value, msg) CHECK_ERROR(value, msg, NULL)
 #define CHECK_ERROR_BOOL(value, msg) CHECK_ERROR(value, msg, false)
@@ -18,4 +22,3 @@
 #define CHECK_POSITIVE_BOOL(target, msg) CHECK_POSITIVE(target, msg, false)
 
 #endif
-

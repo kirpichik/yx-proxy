@@ -1,6 +1,3 @@
 #include "proxy-handler"
 
-int proxy_loop() {
-
-}
-
+int proxy_loop() {}

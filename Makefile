@@ -8,8 +8,8 @@ LDFLAGS=-lm -lpthread
 
 # Sources
 SOURCES=main.c\
-				http-handler.c
-HEADERS=http-handler.h
+				http-parser.c
+HEADERS=http-parser.h
 
 # Compiler output
 OBJECTS=$(SOURCES:.c=.o)
@@ -29,4 +29,6 @@ clean:
 clear: clean
 
 rebuild: clean all
+
+.PHONY: all clear rebuild $(SOURCES)
 
