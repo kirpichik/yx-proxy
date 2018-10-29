@@ -1,9 +1,7 @@
 
-#include <cache.h>
-
 #ifndef _PROXY_HANDLER_H
 #define _PROXY_HANDLER_H
 
-int proxy_loop();
+void proxy_accept_client(int socket);
 
 #endif

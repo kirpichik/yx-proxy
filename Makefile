@@ -8,8 +8,12 @@ LDFLAGS=-lm -lpthread
 
 # Sources
 SOURCES=main.c\
+				sockets-handler.c\
+				proxy-handler.c\
 				http-parser.c
-HEADERS=http-parser.h
+HEADERS=sockets-handler.h\
+				proxy-handler.h\
+				http-parser.h
 
 # Compiler output
 OBJECTS=$(SOURCES:.c=.o)

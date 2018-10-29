@@ -1,4 +1,39 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#include "sockets-handler.h"
 
 int main(int argc, char* argv[]) {
-  return 0;
+  struct sockaddr_in addr;
+  int server_socket;
+  int port;
+
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <listen-port>\n", argv[0]);
+    return -1;
+  }
+
+  port = atoi(argv[1]);
+  fprintf(stderr, "Binding server socket listener to %d...\n", port);
+
+  server_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_socket == -1) {
+    perror("Cannot create socket");
+    return -1;
+  }
+
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  if (bind(server_socket, (struct sockaddr*)&addr, sizeof(addr))) {
+    perror("Cannot bind server socket");
+    return -1;
+  }
+
+  fprintf(stderr, "Server socket bound.\n");
+
+  return sockets_poll_loop(server_socket);
 }
