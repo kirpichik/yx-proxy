@@ -28,6 +28,7 @@ typedef struct handler_state {
   header_entry_t* buffered_headers;
 } handler_state_t;
 
+static bool establish_target_connection(handler_state_t*, char*);
 static header_entry_t* create_header_entry(char*);
 static bool dump_headers_buffer(header_entry_t*, int);
 
@@ -62,14 +63,15 @@ static int handle_request_header_value(http_parser* parser, const char* at, size
   if (strncmp(key, "Connection", sizeof("Connection") - 1)) {
     // Catch Connection: keep-alive header
     value = strdup("close");
-  } else if (strncmp(key, "Host", sizeof("Host") - 1)) {
-    // Catch Host: <target> header
-    // TODO - resolve hosname, connect, dump url, dump headers buffer
-    return 0;
   } else {
     value = (char*) malloc(len + 1);
     memcpy(value, at, len);
     value[len] = '\0';
+
+    if (strncmp(key, "Host", sizeof("Host") - 1)) {
+      // Catch Host: <target> header
+      return establish_target_connection(state, value) ? 0 : 1;
+    }
   }
 
   state->buffered_headers->value = value;
@@ -167,6 +169,11 @@ void proxy_accept_client(int socket) {
   parser->data = state;
 
   sockets_add_socket(socket, &input_handler, parser);
+}
+
+static bool establish_target_connection(handler_state_t* state, char* host) {
+  // TODO - resolve hostname, connect to target, dump url, dump headers
+  return true;
 }
 
 static header_entry_t* create_header_entry(char* key) {
