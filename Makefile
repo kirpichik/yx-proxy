@@ -1,5 +1,5 @@
 # Compiler
-CC=cc
+CC=gcc
 
 # Compiler flags
 INCLUDES=
@@ -28,7 +28,7 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -rf $(OBJECTS) $(EXECUTABLE) $(BISON_PRE_BUILD) $(BISON_PRE_BUILD:.c=.h)
+	rm -rf $(OBJECTS) $(EXECUTABLE)
 
 clear: clean
 
