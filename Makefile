@@ -1,11 +1,13 @@
 # Compiler
 CC=gcc
-
+OS=$(shell uname)
 # Compiler flags
 INCLUDES=
 CFLAGS=-c -Wall -std=gnu99 $(INCLUDES) -D_REENTRANT
 LDFLAGS=-lm -lpthread
-
+ifeq ($(OS),SunOS)
+LDFLAGS+=-lsocket
+endif
 # Sources
 SOURCES=main.c\
 				sockets-handler.c\
