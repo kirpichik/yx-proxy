@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "proxy-handler.h"
 
@@ -20,7 +21,10 @@ typedef struct sockets_state {
   size_t polls_count;
   struct pollfd polls[POLL_SIZE];
   callback_t input_callbacks[POLL_SIZE];
+  callback_t output_callbacks[POLL_SIZE];
 } sockets_state_t;
+
+static void remove_socket_at(size_t);
 
 static sockets_state_t state;
 
@@ -56,20 +60,33 @@ int sockets_poll_loop(int server_socket) {
         continue;
       count--;
 
-      // Check socket state
-      if (revents & ~POLLPRI && revents & ~POLLIN) {
-        sockets_remove_socket(state.polls[i].fd);
-        close(state.polls[i].fd);
+      // Handle server socket
+      if (i == 0) {
+        if (revents & POLLPRI || revents & POLLIN) {
+          socket = accept(server_socket, NULL, NULL);
+          fcntl(socket, F_SETFL, O_NONBLOCK);
+          proxy_accept_client(socket);
+        } else {
+          fprintf(stderr, "Cannot accept new clients\n");
+          close(server_socket);
+          return 1;
+        }
         continue;
       }
 
-      if (i == 0) { // New client
-        socket = accept(server_socket, NULL, NULL);
-        fcntl(socket, F_SETFL, O_NONBLOCK);
-        proxy_accept_client(socket);
-      } else { // Handle client
+      // Handle other sockets
+      if (revents & POLLPRI || revents & POLLIN) {
         callback_t* cb = &state.input_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
+      } else if (revents & POLLOUT) {
+        callback_t* cb = &state.output_callbacks[i];
+        cb->callback(state.polls[i].fd, cb->arg);
+      } else {
+        if (revents & POLLHUP)
+          fprintf(stderr, "Socket %d hup\n", state.polls[i].fd);
+        else
+          fprintf(stderr, "Socket unknown state for %d\n", state.polls[i].fd);
+        remove_socket_at(i);
       }
     }
   }
@@ -77,33 +94,81 @@ int sockets_poll_loop(int server_socket) {
   return -1;
 }
 
-bool sockets_add_socket(int socket, void (*callback)(int, void*), void* arg) {
+bool sockets_add_socket(int socket) {
   if (state.polls_count >= POLL_SIZE)
     return false;
 
   state.polls[state.polls_count].fd = socket;
-  state.polls[state.polls_count].events = POLLIN | POLLPRI;
-  state.input_callbacks[state.polls_count].callback = callback;
-  state.input_callbacks[state.polls_count].arg = arg;
+  state.polls[state.polls_count].events = 0;
   state.polls_count++;
 
   return true;
 }
 
+static ssize_t find_socket(int socket) {
+  for (size_t i = 0; i < state.polls_count; i++)
+    if (socket == state.polls[i].fd)
+      return i;
+  return -1;
+}
+
+bool sockets_set_in_handler(int socket, void (*callback)(int, void*), void* arg) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.input_callbacks[pos].callback = callback;
+  state.input_callbacks[pos].arg = arg;
+  state.polls[pos].events |= POLLIN | POLLPRI;
+
+  return true;
+}
+
+bool sockets_set_out_handler(int socket, void (*callback)(int, void*), void* arg) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.output_callbacks[pos].callback = callback;
+  state.output_callbacks[pos].arg = arg;
+  state.polls[pos].events |= POLLOUT;
+
+  return true;
+}
+
+bool sockets_cancel_in_handle(int socket) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.polls[pos].events &= ~(POLLIN | POLLPRI);
+
+  return true;
+}
+
+bool sockets_cancel_out_handle(int socket) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.polls[pos].events &= ~(POLLIN | POLLPRI);
+
+  return true;
+}
+
+static void remove_socket_at(size_t pos) {
+  state.polls_count--;
+  memcpy(&state.polls[pos], &state.polls[state.polls_count], sizeof(struct pollfd));
+  memcpy(&state.input_callbacks[pos], &state.input_callbacks[state.polls_count], sizeof(callback_t));
+  memcpy(&state.output_callbacks[pos], &state.output_callbacks[state.polls_count], sizeof(callback_t));
+}
+
 bool sockets_remove_socket(int socket) {
-  for (size_t i = 0; i < state.polls_count; i++) {
-    if (state.polls[i].fd == socket) {
-      state.polls_count--;
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
 
-      memcpy(&state.polls[i], &state.polls[state.polls_count], sizeof(struct pollfd));
-      memset(&state.polls[state.polls_count], 0, sizeof(struct pollfd));
+  remove_socket_at(pos);
 
-      memcpy(&state.input_callbacks[i], &state.input_callbacks[state.polls_count], sizeof(callback_t));
-      memset(&state.input_callbacks[state.polls_count], 0, sizeof(callback_t));
-
-      return true;
-    }
-  }
-
-  return false;
+  return true;
 }

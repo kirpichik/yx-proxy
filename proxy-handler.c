@@ -14,6 +14,7 @@
 #include "proxy-handler.h"
 
 #define BUFFER_SIZE 1024
+#define DEFAULT_HTTP_PORT 80
 
 typedef struct header_entry {
   char* key;
@@ -28,7 +29,9 @@ typedef struct handler_state {
   header_entry_t* buffered_headers;
 } handler_state_t;
 
+static struct in_addr* resolve_hostname(char*);
 static bool establish_target_connection(handler_state_t*, char*);
+static bool dump_url(char*, int);
 static header_entry_t* create_header_entry(char*);
 static bool dump_headers_buffer(header_entry_t*, int);
 
@@ -60,7 +63,7 @@ static int handle_request_header_value(http_parser* parser, const char* at, size
   char* value;
   char* key = state->buffered_headers->key;
 
-  if (strncmp(key, "Connection", sizeof("Connection") - 1)) {
+if (!strncmp(key, "Connection", sizeof("Connection") - 1)) {
     // Catch Connection: keep-alive header
     value = strdup("close");
   } else {
@@ -68,8 +71,9 @@ static int handle_request_header_value(http_parser* parser, const char* at, size
     memcpy(value, at, len);
     value[len] = '\0';
 
-    if (strncmp(key, "Host", sizeof("Host") - 1)) {
+    if (!strncmp(key, "Host", sizeof("Host") - 1)) {
       // Catch Host: <target> header
+      state->buffered_headers->value = value;
       return establish_target_connection(state, value) ? 0 : 1;
     }
   }
@@ -168,11 +172,89 @@ void proxy_accept_client(int socket) {
 
   parser->data = state;
 
-  sockets_add_socket(socket, &input_handler, parser);
+  if (!sockets_add_socket(socket)) {
+    fprintf(stderr, "Too many file descriptors.\n");
+    close(socket);
+    return;
+  }
+  sockets_set_in_handler(socket, &input_handler, parser);
+}
+
+static struct in_addr* resolve_hostname(char* hostname) {
+  struct hostent* entry = gethostbyname(hostname);
+  if (entry == NULL)
+    return NULL;
+
+  return (struct in_addr*) entry->h_addr_list[0];
 }
 
 static bool establish_target_connection(handler_state_t* state, char* host) {
-  // TODO - resolve hostname, connect to target, dump url, dump headers
+  struct sockaddr_in addr;
+  struct in_addr* resolved;
+  char* hostname = host;
+  int port = DEFAULT_HTTP_PORT;
+  char* split_pos = strrchr(host, ':');
+  if (split_pos != NULL) {
+    port = atoi(split_pos + (-strlen(host)));
+    hostname = (char*) malloc((size_t) (split_pos - host + 1));
+    memcpy(hostname, host, (size_t) (split_pos - host));
+    hostname[split_pos - host] = '\0';
+  }
+
+  state->target_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (state->target_socket < 0) {
+    perror("Cannot create target socket");
+    return false;
+  }
+
+  if ((resolved = resolve_hostname(hostname)) == NULL) {
+    fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
+    close(state->target_socket);
+    if (hostname != host)
+      free(hostname);
+    return false;
+  }
+
+  // FIXME - check this!
+  addr.sin_addr.s_addr = *((in_addr_t*) resolved);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+
+  if (hostname != host)
+    free(hostname);
+
+  if (connect(state->target_socket, (struct sockaddr*) &addr, sizeof(addr)) == -1) {
+    perror("Cannot connect to target");
+    close(state->target_socket);
+    return false;
+  }
+
+  printf("ESTABLISHED!!!!\n");
+
+  dump_url(state->url, state->target_socket);
+  dump_headers_buffer(state->buffered_headers, state->target_socket);
+  // TODO - add callbacks
+
+  return true;
+}
+
+static bool dump_url(char* url, int socket) {
+  // TODO - change when multithreading
+  // Unset nonblock
+  int oldfl = fcntl(socket, F_GETFL);
+  if (oldfl == -1) {
+    perror("Cannot get socket flags");
+    return false;
+  }
+
+  // FIXME - refactor this!
+  send(socket, "GET ", sizeof("GET ") - 1, 0);
+  send(socket, url, strlen(url), 0);
+  send(socket, " HTTP/1.1\n", sizeof(" HTTP/1.1\n") - 1, 0);
+
+  // Return socket state
+  fcntl(socket, F_SETFL, oldfl);
+
   return true;
 }
 
