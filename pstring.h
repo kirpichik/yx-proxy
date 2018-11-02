@@ -16,6 +16,8 @@ bool pstring_append(pstring_t* str, const char* buff, size_t len);
 
 bool pstring_replace(pstring_t* str, const char* buff, size_t len);
 
+bool pstring_substring(pstring_t* str, size_t begin);
+
 void pstring_finalize(pstring_t* str);
 
 #endif

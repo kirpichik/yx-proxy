@@ -12,7 +12,10 @@
 #define BUFFER_SIZE 1024
 
 static void client_output_handler(int socket, void* arg) {
-  // TODO
+  handler_state_t* state = (handler_state_t*) arg;
+
+  if (send_pstring(socket, &state->client_outbuff))
+    sockets_enable_in_handle(state->target_socket);
 }
 
 static bool send_to_client(handler_state_t* state, const char* buff, size_t len) {

@@ -1,4 +1,6 @@
 
+#include <stdbool.h>
+
 #include "pstring.h"
 
 #ifndef _PROXY_HANDLER_H
@@ -22,5 +24,7 @@ typedef struct handler_state {
 header_entry_t* create_header_entry(const char* key, size_t key_len);
 
 void proxy_accept_client(int socket);
+
+bool send_pstring(int socket, pstring_t* buff);
 
 #endif

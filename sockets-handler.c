@@ -138,6 +138,26 @@ bool sockets_set_out_handler(int socket, void (*callback)(int, void*), void* arg
   return true;
 }
 
+bool sockets_enable_in_handle(int socket) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.polls[pos].events |= POLLIN | POLLPRI;
+
+  return true;
+}
+
+bool sockets_enable_out_handle(int socket) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.polls[pos].events |= POLLOUT;
+
+  return true;
+}
+
 bool sockets_cancel_in_handle(int socket) {
   ssize_t pos = find_socket(socket);
   if (pos == -1)

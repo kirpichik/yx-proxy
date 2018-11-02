@@ -23,7 +23,7 @@ bool pstring_append(pstring_t* str, const char* buff, size_t len) {
     return false;
 
   memcpy(str->str + str->len, buff, len);
-  str->len += size;
+  str->len += len;
 
   return true;
 }
@@ -39,9 +39,24 @@ bool pstring_replace(pstring_t* str, const char* buff, size_t len) {
   return pstring_append(str, buff, len);
 }
 
+bool pstring_substring(pstring_t* str, size_t begin) {
+  if (str == NULL || str->str == NULL || str->len <= begin)
+    return false;
+
+  char* buff = (char*) malloc(str->len - begin);
+  if (buff == NULL)
+    return false;
+
+  memcpy(buff, str->str + begin, str->len - begin);
+  free(str->str);
+  str->str = buff;
+  str->len -= begin;
+
+  return true;
+}
+
 void pstring_finalize(pstring_t* str) {
   if (str == NULL || str->str == NULL)
     return;
   str->str[str->len] = '\0';
 }
-

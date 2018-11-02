@@ -1,7 +1,9 @@
 
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "http-parser.h"
 #include "sockets-handler.h"
@@ -47,4 +49,22 @@ void proxy_accept_client(int socket) {
     return;
   }
   sockets_set_in_handler(socket, &client_input_handler, parser);
+}
+
+bool send_pstring(int socket, pstring_t* buff) {
+  size_t offset = 0;
+  ssize_t result;
+
+  while ((result = send(socket, buff->str + offset, buff->len - offset, 0)) != buff->len - offset) {
+    if (result == -1) {
+      if (errno != EWOULDBLOCK)
+        perror("Cannot send data to target");
+      pstring_substring(buff, offset);
+      return false;
+    }
+
+    offset += result;
+  }
+
+  return true;
 }

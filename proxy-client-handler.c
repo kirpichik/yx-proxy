@@ -24,7 +24,10 @@
 #define DEF_LEN(str) sizeof(str) - 1
 
 static void target_output_handler(int socket, void* arg) {
-  // TODO
+  handler_state_t* state = (handler_state_t*) arg;
+
+  if (send_pstring(socket, &state->target_outbuff))
+    sockets_enable_in_handle(state->client_socket);
 }
 
 static bool send_to_target(handler_state_t* state, const char* buff, size_t len) {
