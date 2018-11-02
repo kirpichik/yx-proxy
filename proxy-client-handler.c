@@ -84,6 +84,32 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   return result;
 }
 
+static bool dump_buffered_headers(handler_state_t* state) {
+  header_entry_t* entry = state->buffered_headers;
+  char* output;
+  size_t len;
+
+  while (entry) {
+    len = entry->key.len + entry->key.len + 3; // 3 is ": " and '\n'
+    output = (char*) malloc(len);
+
+    memcpy(output, entry->key.str, entry->key.len);
+    output[entry->key.len] = ':';
+    output[entry->key.len + 1] = ' ';
+    memcpy(output + entry->key.len + 2, entry->value.str, entry->value.len);
+    output[len] = '\n';
+
+    if (!send_to_target(state, output, len))
+      return false;
+
+    entry = state->buffered_headers->next;
+    free(state->buffered_headers);
+    state->buffered_headers = entry;
+  }
+
+  return true;
+}
+
 static struct in_addr* resolve_hostname(char* hostname) {
   struct hostent* entry = gethostbyname(hostname);
   if (entry == NULL)
@@ -168,15 +194,15 @@ static bool handle_finished_header(http_parser* parser) {
   pstring_finalize(&header->value);
 
   // Already connected
-  if (state->target_socket != -1) {
-    // TODO - dump buffered headers
-    return true;
-  }
+  if (state->target_socket != -1)
+    return dump_buffered_headers(state);
 
   if (!strncmp(header->key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
     if (!establish_target_connection(state, header->value.str))
       return false;
-    dump_initial_line(state, get_method_by_id(parser->method));
+    if (!dump_initial_line(state, get_method_by_id(parser->method)))
+      return false;
+    return dump_buffered_headers(state);
   }
 
   return true;
