@@ -75,17 +75,19 @@ int sockets_poll_loop(int server_socket) {
       }
 
       // Handle other sockets
+
       if (revents & POLLPRI || revents & POLLIN) {
         callback_t* cb = &state.input_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
-      } else if (revents & POLLOUT) {
+      }
+
+      if (revents & POLLOUT) {
         callback_t* cb = &state.output_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
-      } else {
-        if (revents & POLLHUP)
-          fprintf(stderr, "Socket %d hup\n", state.polls[i].fd);
-        else
-          fprintf(stderr, "Socket unknown state for %d\n", state.polls[i].fd);
+      }
+
+      if (revents & POLLHUP || revents & POLLERR || revents & POLLNVAL) {
+        fprintf(stderr, "Socket %d hup\n", state.polls[i].fd);
         remove_socket_at(i);
       }
     }
