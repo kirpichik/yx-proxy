@@ -63,7 +63,7 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
     return false;
 
   size_t prefix_len = strlen(method) + 1;                 // "<method> "
-  size_t suffix_len = DEF_LEN(PROTOCOL_VERSION_STR) + 2;  // " <version>\n"
+  size_t suffix_len = DEF_LEN(PROTOCOL_VERSION_STR) + 3;  // " <version>\r\n"
   size_t url_len = strlen(state->url.str);
   size_t len = prefix_len + url_len + suffix_len;
 
@@ -75,7 +75,8 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   output[prefix_len - 1] = ' ';
   memcpy(output + prefix_len, state->url.str, url_len);
   output[prefix_len + url_len] = ' ';
-  memcpy(output + prefix_len + url_len, PROTOCOL_VERSION_STR, suffix_len - 1);
+  memcpy(output + prefix_len + url_len + 1, PROTOCOL_VERSION_STR, suffix_len - 1);
+  output[len - 2] = '\r';
   output[len - 1] = '\n';
 
   bool result = send_to_target(state, output, len);
@@ -90,22 +91,28 @@ static bool dump_buffered_headers(handler_state_t* state) {
   size_t len;
 
   while (entry) {
-    len = entry->key.len + entry->key.len + 3; // 3 is ": " and '\n'
+    len = entry->key.len + entry->value.len + 4; // 4 is ": " and "\r\n"
     output = (char*) malloc(len);
 
     memcpy(output, entry->key.str, entry->key.len);
     output[entry->key.len] = ':';
     output[entry->key.len + 1] = ' ';
     memcpy(output + entry->key.len + 2, entry->value.str, entry->value.len);
-    output[len] = '\n';
+    output[len - 2] = '\r';
+    output[len - 1] = '\n';
 
-    if (!send_to_target(state, output, len))
+    if (!send_to_target(state, output, len)) {
+      free(output);
       return false;
+    }
 
+    free(output);
     entry = state->buffered_headers->next;
     free(state->buffered_headers);
     state->buffered_headers = entry;
   }
+  
+  state->buffered_headers = NULL;
 
   return true;
 }
@@ -185,8 +192,8 @@ static bool handle_finished_header(http_parser* parser) {
 
   if (!strncmp(header->key.str, HEADER_CONNECTION,
                DEF_LEN(HEADER_CONNECTION))) {
-    pstring_replace(&header->value, HEADER_CONNECTION,
-                    DEF_LEN(HEADER_CONNECTION));
+    pstring_replace(&header->value, HEADER_CONNECTION_CLOSE,
+                    DEF_LEN(HEADER_CONNECTION_CLOSE));
     pstring_finalize(&header->value);
     return true;
   }
@@ -217,7 +224,7 @@ static int handle_request_header_field(http_parser* parser,
 
   if (state->buffered_headers) {               // Previous header exists
     if (state->buffered_headers->value.str) {  // Value stored, creating new
-      // TODO - handle previous header
+      handle_finished_header(parser);
       header_entry_t* entry = create_header_entry(at, len);
       if (entry == NULL)
         return 1;
@@ -289,7 +296,8 @@ static http_parser_settings http_request_callbacks = {
 void client_input_handler(int socket, void* arg) {
   http_parser* parser = (http_parser*)arg;
   char buff[BUFFER_SIZE];
-  int result, nparsed;
+  ssize_t result;
+  size_t nparsed;
 
   while (1) {
     result = recv(socket, buff, BUFFER_SIZE, 0);

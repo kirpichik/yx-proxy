@@ -47,7 +47,7 @@ int sockets_poll_loop(int server_socket) {
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
   listen(server_socket, POLL_SIZE);
 
-  while ((count = poll(state.polls, state.polls_count, -1)) != -1) {
+  while ((count = poll(state.polls, (nfds_t) state.polls_count, -1)) != -1) {
     for (size_t i = 0; i < state.polls_count; i++) {
       if (count == 0)
         break;

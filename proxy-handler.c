@@ -37,6 +37,7 @@ void proxy_accept_client(int socket) {
   handler_state_t* state = malloc(sizeof(handler_state_t));
   state->client_socket = socket;
   state->target_socket = -1;
+  state->buffered_headers = NULL;
   pstring_init(&state->target_outbuff);
   pstring_init(&state->client_outbuff);
   pstring_init(&state->url);

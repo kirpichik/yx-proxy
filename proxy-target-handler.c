@@ -21,6 +21,7 @@ static void client_output_handler(int socket, void* arg) {
 static bool send_to_client(handler_state_t* state,
                            const char* buff,
                            size_t len) {
+  write(STDOUT_FILENO, buff, len);
   if (!pstring_append(&state->client_outbuff, buff, len))
     return false;
   // TODO - optimisation: try to send, before this
@@ -32,7 +33,7 @@ static bool send_to_client(handler_state_t* state,
 void target_input_handler(int socket, void* arg) {
   handler_state_t* state = (handler_state_t*)arg;
   char buff[BUFFER_SIZE];
-  int result;
+  ssize_t result;
 
   while (1) {
     result = recv(socket, buff, BUFFER_SIZE, 0);
@@ -47,6 +48,7 @@ void target_input_handler(int socket, void* arg) {
     } else if (result == 0)
       return;
 
+    write(STDOUT_FILENO, buff, result);
     if (!send_to_client(state, buff, result)) {
       fprintf(stderr, "Cannot send data to client");
       return;
