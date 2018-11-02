@@ -1,16 +1,16 @@
 
-#include <sys/socket.h>
 #include <errno.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
-#include <netdb.h>
 
 #include "http-parser.h"
-#include "sockets-handler.h"
 #include "proxy-handler.h"
 #include "proxy-target-handler.h"
+#include "sockets-handler.h"
 
 #include "proxy-client-handler.h"
 
@@ -24,13 +24,15 @@
 #define DEF_LEN(str) sizeof(str) - 1
 
 static void target_output_handler(int socket, void* arg) {
-  handler_state_t* state = (handler_state_t*) arg;
+  handler_state_t* state = (handler_state_t*)arg;
 
   if (send_pstring(socket, &state->target_outbuff))
     sockets_enable_in_handle(state->client_socket);
 }
 
-static bool send_to_target(handler_state_t* state, const char* buff, size_t len) {
+static bool send_to_target(handler_state_t* state,
+                           const char* buff,
+                           size_t len) {
   if (!pstring_append(&state->target_outbuff, buff, len))
     return false;
   // TODO - optimisation: try to send, before this
@@ -60,12 +62,12 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   if (method == NULL)
     return false;
 
-  size_t prefix_len = strlen(method) + 1; // "<method> "
-  size_t suffix_len = DEF_LEN(PROTOCOL_VERSION_STR) + 2; // " <version>\n"
+  size_t prefix_len = strlen(method) + 1;                 // "<method> "
+  size_t suffix_len = DEF_LEN(PROTOCOL_VERSION_STR) + 2;  // " <version>\n"
   size_t url_len = strlen(state->url.str);
-  size_t len = prefix_len + url_len +  suffix_len;
+  size_t len = prefix_len + url_len + suffix_len;
 
-  char* output = (char*) malloc(len);
+  char* output = (char*)malloc(len);
   if (output == NULL)
     return false;
 
@@ -87,7 +89,7 @@ static struct in_addr* resolve_hostname(char* hostname) {
   if (entry == NULL)
     return NULL;
 
-  return (struct in_addr*) entry->h_addr_list[0];
+  return (struct in_addr*)entry->h_addr_list[0];
 }
 
 static bool establish_target_connection(handler_state_t* state, char* host) {
@@ -99,8 +101,8 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
 
   if (split_pos != NULL) {
     port = atoi(split_pos + (-strlen(host)));
-    hostname = (char*) malloc((size_t) (split_pos - host + 1));
-    memcpy(hostname, host, (size_t) (split_pos - host));
+    hostname = (char*)malloc((size_t)(split_pos - host + 1));
+    memcpy(hostname, host, (size_t)(split_pos - host));
     hostname[split_pos - host] = '\0';
   }
 
@@ -118,14 +120,15 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
     return false;
   }
 
-  addr.sin_addr.s_addr = *((in_addr_t*) resolved);
+  addr.sin_addr.s_addr = *((in_addr_t*)resolved);
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
 
   if (hostname != host)
     free(hostname);
 
-  if (connect(state->target_socket, (struct sockaddr*) &addr, sizeof(addr)) == -1) {
+  if (connect(state->target_socket, (struct sockaddr*)&addr, sizeof(addr)) ==
+      -1) {
     perror("Cannot connect to target");
     close(state->target_socket);
     return false;
@@ -138,7 +141,7 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
 }
 
 static int handle_request_url(http_parser* parser, const char* at, size_t len) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+  handler_state_t* state = (handler_state_t*)parser->data;
 
   if (!pstring_append(&state->url, at, len)) {
     perror("Cannot store client url");
@@ -149,13 +152,15 @@ static int handle_request_url(http_parser* parser, const char* at, size_t len) {
 }
 
 static bool handle_finished_header(http_parser* parser) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+  handler_state_t* state = (handler_state_t*)parser->data;
   header_entry_t* header = state->buffered_headers;
   if (header == NULL)
     return true;
 
-  if (!strncmp(header->key.str, HEADER_CONNECTION, DEF_LEN(HEADER_CONNECTION))) {
-    pstring_replace(&header->value, HEADER_CONNECTION, DEF_LEN(HEADER_CONNECTION));
+  if (!strncmp(header->key.str, HEADER_CONNECTION,
+               DEF_LEN(HEADER_CONNECTION))) {
+    pstring_replace(&header->value, HEADER_CONNECTION,
+                    DEF_LEN(HEADER_CONNECTION));
     pstring_finalize(&header->value);
     return true;
   }
@@ -177,20 +182,22 @@ static bool handle_finished_header(http_parser* parser) {
   return true;
 }
 
-static int handle_request_header_field(http_parser* parser, const char* at, size_t len) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+static int handle_request_header_field(http_parser* parser,
+                                       const char* at,
+                                       size_t len) {
+  handler_state_t* state = (handler_state_t*)parser->data;
 
   pstring_finalize(&state->url);
 
-  if (state->buffered_headers) { // Previous header exists
-    if (state->buffered_headers->value.str) { // Value stored, creating new
+  if (state->buffered_headers) {               // Previous header exists
+    if (state->buffered_headers->value.str) {  // Value stored, creating new
       // TODO - handle previous header
       header_entry_t* entry = create_header_entry(at, len);
       if (entry == NULL)
         return 1;
       entry->next = state->buffered_headers;
       state->buffered_headers = entry;
-    } else { // Key append
+    } else {  // Key append
       if (!pstring_append(&state->buffered_headers->key, at, len)) {
         perror("Cannot append header key");
         return 1;
@@ -202,8 +209,10 @@ static int handle_request_header_field(http_parser* parser, const char* at, size
   return 0;
 }
 
-static int handle_request_header_value(http_parser* parser, const char* at, size_t len) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+static int handle_request_header_value(http_parser* parser,
+                                       const char* at,
+                                       size_t len) {
+  handler_state_t* state = (handler_state_t*)parser->data;
 
   pstring_finalize(&state->buffered_headers->key);
 
@@ -216,7 +225,7 @@ static int handle_request_header_value(http_parser* parser, const char* at, size
 }
 
 static int handle_request_headers_complete(http_parser* parser) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+  handler_state_t* state = (handler_state_t*)parser->data;
 
   pstring_finalize(&state->url);
   handle_finished_header(parser);
@@ -225,8 +234,10 @@ static int handle_request_headers_complete(http_parser* parser) {
   return 0;
 }
 
-static int handle_request_body(http_parser* parser, const char* at, size_t len) {
-  handler_state_t* state = (handler_state_t*) parser->data;
+static int handle_request_body(http_parser* parser,
+                               const char* at,
+                               size_t len) {
+  handler_state_t* state = (handler_state_t*)parser->data;
 
   if (send_to_target(state, at, len)) {
     perror("Cannot proxy client data body to target socket");
@@ -237,20 +248,20 @@ static int handle_request_body(http_parser* parser, const char* at, size_t len) 
 }
 
 static http_parser_settings http_request_callbacks = {
-  NULL, /* on_message_begin */
-  handle_request_url,
-  NULL, /* on_status */
-  handle_request_header_field,
-  handle_request_header_value,
-  handle_request_headers_complete,
-  handle_request_body,
-  NULL, /* on_message_complete */
-  NULL, /* on_chunk_header */
-  NULL /* on_chunk_complete */
+    NULL, /* on_message_begin */
+    handle_request_url,
+    NULL, /* on_status */
+    handle_request_header_field,
+    handle_request_header_value,
+    handle_request_headers_complete,
+    handle_request_body,
+    NULL, /* on_message_complete */
+    NULL, /* on_chunk_header */
+    NULL  /* on_chunk_complete */
 };
 
 void client_input_handler(int socket, void* arg) {
-  http_parser* parser = (http_parser*) arg;
+  http_parser* parser = (http_parser*)arg;
   char buff[BUFFER_SIZE];
   int result, nparsed;
 
@@ -267,7 +278,8 @@ void client_input_handler(int socket, void* arg) {
     } else if (result == 0)
       return;
 
-    nparsed = http_parser_execute(parser, &http_request_callbacks, buff, result);
+    nparsed =
+        http_parser_execute(parser, &http_request_callbacks, buff, result);
     if (nparsed != result) {
       fprintf(stderr, "Cannot parse http input from client socket");
       sockets_remove_socket(socket);

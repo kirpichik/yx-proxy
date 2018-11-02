@@ -8,9 +8,13 @@ int sockets_poll_loop(int server_socket);
 
 bool sockets_add_socket(int socket);
 
-bool sockets_set_in_handler(int socket, void (*callback)(int, void*), void* arg);
+bool sockets_set_in_handler(int socket,
+                            void (*callback)(int, void*),
+                            void* arg);
 
-bool sockets_set_out_handler(int socket, void (*callback)(int, void*), void* arg);
+bool sockets_set_out_handler(int socket,
+                             void (*callback)(int, void*),
+                             void* arg);
 
 bool sockets_enable_in_handle(int socket);
 

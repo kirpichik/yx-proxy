@@ -1,10 +1,10 @@
 
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
-#include <fcntl.h>
-#include <string.h>
 #include <unistd.h>
-#include <stdio.h>
 
 #include "proxy-handler.h"
 
@@ -13,7 +13,7 @@
 #define POLL_SIZE 50
 
 typedef struct callback {
-  void (*callback) (int, void*);
+  void (*callback)(int, void*);
   void* arg;
 } callback_t;
 
@@ -114,7 +114,9 @@ static ssize_t find_socket(int socket) {
   return -1;
 }
 
-bool sockets_set_in_handler(int socket, void (*callback)(int, void*), void* arg) {
+bool sockets_set_in_handler(int socket,
+                            void (*callback)(int, void*),
+                            void* arg) {
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
@@ -126,7 +128,9 @@ bool sockets_set_in_handler(int socket, void (*callback)(int, void*), void* arg)
   return true;
 }
 
-bool sockets_set_out_handler(int socket, void (*callback)(int, void*), void* arg) {
+bool sockets_set_out_handler(int socket,
+                             void (*callback)(int, void*),
+                             void* arg) {
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
@@ -180,9 +184,12 @@ bool sockets_cancel_out_handle(int socket) {
 
 static void remove_socket_at(size_t pos) {
   state.polls_count--;
-  memcpy(&state.polls[pos], &state.polls[state.polls_count], sizeof(struct pollfd));
-  memcpy(&state.input_callbacks[pos], &state.input_callbacks[state.polls_count], sizeof(callback_t));
-  memcpy(&state.output_callbacks[pos], &state.output_callbacks[state.polls_count], sizeof(callback_t));
+  memcpy(&state.polls[pos], &state.polls[state.polls_count],
+         sizeof(struct pollfd));
+  memcpy(&state.input_callbacks[pos], &state.input_callbacks[state.polls_count],
+         sizeof(callback_t));
+  memcpy(&state.output_callbacks[pos],
+         &state.output_callbacks[state.polls_count], sizeof(callback_t));
 }
 
 bool sockets_remove_socket(int socket) {

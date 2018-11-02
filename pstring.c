@@ -17,7 +17,7 @@ bool pstring_append(pstring_t* str, const char* buff, size_t len) {
     return false;
 
   size_t size = len + (str->str ? 0 : 1);
-  str->str = (char*) realloc(str->str, str->len + size);
+  str->str = (char*)realloc(str->str, str->len + size);
 
   if (str->str == NULL)
     return false;
@@ -43,7 +43,7 @@ bool pstring_substring(pstring_t* str, size_t begin) {
   if (str == NULL || str->str == NULL || str->len <= begin)
     return false;
 
-  char* buff = (char*) malloc(str->len - begin);
+  char* buff = (char*)malloc(str->len - begin);
   if (buff == NULL)
     return false;
 

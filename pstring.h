@@ -1,6 +1,6 @@
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifndef _PSTRING_H
 #define _PSTRING_H
