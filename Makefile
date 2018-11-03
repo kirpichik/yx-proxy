@@ -6,7 +6,7 @@ INCLUDES=
 CFLAGS=-c -Wall -std=gnu99 $(INCLUDES) -D_REENTRANT
 LDFLAGS=-lm -lpthread
 ifeq ($(OS),SunOS)
-LDFLAGS+=-lsocket
+LDFLAGS+=-lsocket -lnsl
 endif
 # Sources
 SOURCES=main.c\
