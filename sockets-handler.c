@@ -22,6 +22,7 @@ typedef struct sockets_state {
   struct pollfd polls[POLL_SIZE];
   callback_t input_callbacks[POLL_SIZE];
   callback_t output_callbacks[POLL_SIZE];
+  callback_t hup_callbacks[POLL_SIZE];
 } sockets_state_t;
 
 static void remove_socket_at(size_t);
@@ -32,6 +33,8 @@ static void init_sockets_state(int server_socket) {
   // Not required if state is global, but still do it for the future.
   memset(state.polls, 0, sizeof(state.polls));
   memset(state.input_callbacks, 0, sizeof(state.input_callbacks));
+  memset(state.output_callbacks, 0, sizeof(state.output_callbacks));
+  memset(state.hup_callbacks, 0, sizeof(state.hup_callbacks));
 
   state.polls_count = 1;
   state.polls[0].fd = server_socket;
@@ -47,7 +50,7 @@ int sockets_poll_loop(int server_socket) {
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
   listen(server_socket, POLL_SIZE);
 
-  while ((count = poll(state.polls, (nfds_t) state.polls_count, -1)) != -1) {
+  while ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) != -1) {
     for (size_t i = 0; i < state.polls_count; i++) {
       if (count == 0)
         break;
@@ -75,19 +78,37 @@ int sockets_poll_loop(int server_socket) {
       }
 
       // Handle other sockets
+      bool ok = false;
 
       if (revents & POLLPRI || revents & POLLIN) {
         callback_t* cb = &state.input_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
+        ok = true;
       }
 
       if (revents & POLLOUT) {
         callback_t* cb = &state.output_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
+        ok = true;
       }
 
-      if (revents & POLLHUP || revents & POLLERR || revents & POLLNVAL) {
+      if (ok)
+        continue;
+
+      if (revents & POLLHUP) {
         fprintf(stderr, "Socket %d hup\n", state.polls[i].fd);
+        callback_t* cb = &state.hup_callbacks[i];
+        cb->callback(state.polls[i].fd, cb->arg);
+        remove_socket_at(i);
+      }
+
+      if (revents & POLLNVAL) {
+        fprintf(stderr, "Socket %d nval\n", state.polls[i].fd);
+        remove_socket_at(i);
+      }
+
+      if (revents & POLLERR) {
+        fprintf(stderr, "Socket %d error\n", state.polls[i].fd);
         remove_socket_at(i);
       }
     }
@@ -142,6 +163,19 @@ bool sockets_set_out_handler(int socket,
   return true;
 }
 
+bool sockets_set_hup_handler(int socket,
+                             void (*callback)(int, void*),
+                             void* arg) {
+  ssize_t pos = find_socket(socket);
+  if (pos == -1)
+    return false;
+
+  state.hup_callbacks[pos].callback = callback;
+  state.hup_callbacks[pos].arg = arg;
+
+  return true;
+}
+
 bool sockets_enable_in_handle(int socket) {
   ssize_t pos = find_socket(socket);
   if (pos == -1)
@@ -177,7 +211,7 @@ bool sockets_cancel_out_handle(int socket) {
   if (pos == -1)
     return false;
 
-  state.polls[pos].events &= ~(POLLIN | POLLPRI);
+  state.polls[pos].events &= ~POLLOUT;
 
   return true;
 }

@@ -19,15 +19,17 @@
 #define HEADER_CONNECTION "Connection"
 #define HEADER_HOST "Host"
 #define HEADER_CONNECTION_CLOSE "close"
-#define PROTOCOL_VERSION_STR "HTTP/1.1"
+#define PROTOCOL_VERSION_STR "HTTP/1.0"
 
 #define DEF_LEN(str) sizeof(str) - 1
 
 static void target_output_handler(int socket, void* arg) {
   handler_state_t* state = (handler_state_t*)arg;
 
-  if (send_pstring(socket, &state->target_outbuff))
+  if (send_pstring(socket, &state->target_outbuff)) {
+    sockets_cancel_out_handle(state->target_socket);
     sockets_enable_in_handle(state->client_socket);
+  }
 }
 
 static bool send_to_target(handler_state_t* state,
@@ -75,7 +77,8 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   output[prefix_len - 1] = ' ';
   memcpy(output + prefix_len, state->url.str, url_len);
   output[prefix_len + url_len] = ' ';
-  memcpy(output + prefix_len + url_len + 1, PROTOCOL_VERSION_STR, suffix_len - 1);
+  memcpy(output + prefix_len + url_len + 1, PROTOCOL_VERSION_STR,
+         suffix_len - 1);
   output[len - 2] = '\r';
   output[len - 1] = '\n';
 
@@ -83,38 +86,6 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   free(output);
 
   return result;
-}
-
-static bool dump_buffered_headers(handler_state_t* state) {
-  header_entry_t* entry = state->buffered_headers;
-  char* output;
-  size_t len;
-
-  while (entry) {
-    len = entry->key.len + entry->value.len + 4; // 4 is ": " and "\r\n"
-    output = (char*) malloc(len);
-
-    memcpy(output, entry->key.str, entry->key.len);
-    output[entry->key.len] = ':';
-    output[entry->key.len + 1] = ' ';
-    memcpy(output + entry->key.len + 2, entry->value.str, entry->value.len);
-    output[len - 2] = '\r';
-    output[len - 1] = '\n';
-
-    if (!send_to_target(state, output, len)) {
-      free(output);
-      return false;
-    }
-
-    free(output);
-    entry = state->buffered_headers->next;
-    free(state->buffered_headers);
-    state->buffered_headers = entry;
-  }
-  
-  state->buffered_headers = NULL;
-
-  return true;
 }
 
 static struct in_addr* resolve_hostname(char* hostname) {
@@ -148,6 +119,7 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
   if ((resolved = resolve_hostname(hostname)) == NULL) {
     fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
     close(state->target_socket);
+    state->target_socket = -1;
     if (hostname != host)
       free(hostname);
     return false;
@@ -164,11 +136,28 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
       -1) {
     perror("Cannot connect to target");
     close(state->target_socket);
+    state->target_socket = -1;
     return false;
   }
 
-  sockets_add_socket(state->target_socket);
-  sockets_set_in_handler(state->target_socket, &target_input_handler, state);
+  http_parser* parser = (http_parser*)malloc(sizeof(http_parser));
+  if (parser == NULL) {
+    perror("Cannot allocate parser for target connection");
+    close(state->target_socket);
+    state->target_socket = -1;
+    return false;
+  }
+  http_parser_init(parser, HTTP_RESPONSE);
+  parser->data = state;
+
+  if (!sockets_add_socket(state->target_socket)) {
+    fprintf(stderr, "Too many file descriptors\n");
+    close(state->target_socket);
+    state->target_socket = -1;
+    return false;
+  }
+  sockets_set_hup_handler(state->target_socket, &socket_hup_handler, parser);
+  sockets_set_in_handler(state->target_socket, &target_input_handler, parser);
 
   return true;
 }
@@ -202,14 +191,14 @@ static bool handle_finished_header(http_parser* parser) {
 
   // Already connected
   if (state->target_socket != -1)
-    return dump_buffered_headers(state);
+    return dump_buffered_headers(state, &send_to_target);
 
   if (!strncmp(header->key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
     if (!establish_target_connection(state, header->value.str))
       return false;
     if (!dump_initial_line(state, get_method_by_id(parser->method)))
       return false;
-    return dump_buffered_headers(state);
+    return dump_buffered_headers(state, &send_to_target);
   }
 
   return true;
@@ -272,8 +261,8 @@ static int handle_request_body(http_parser* parser,
                                size_t len) {
   handler_state_t* state = (handler_state_t*)parser->data;
 
-  if (send_to_target(state, at, len)) {
-    perror("Cannot proxy client data body to target socket");
+  if (!send_to_target(state, at, len)) {
+    fprintf(stderr, "Cannot proxy client data body to target socket\n");
     return 1;
   }
 
@@ -295,6 +284,7 @@ static http_parser_settings http_request_callbacks = {
 
 void client_input_handler(int socket, void* arg) {
   http_parser* parser = (http_parser*)arg;
+  handler_state_t* state = (handler_state_t*)parser->data;
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
@@ -305,19 +295,29 @@ void client_input_handler(int socket, void* arg) {
     if (result == -1) {
       if (errno != EAGAIN) {
         perror("Cannot recv data from client");
+        free(parser);
         sockets_remove_socket(socket);
         close(socket);
       }
       return;
-    } else if (result == 0)
+    } else if (result == 0) {
+      if (state->proxy_finished)
+        free(parser);
       return;
+    }
 
     nparsed =
         http_parser_execute(parser, &http_request_callbacks, buff, result);
     if (nparsed != result) {
-      fprintf(stderr, "Cannot parse http input from client socket");
+      fprintf(stderr, "Cannot parse http input from client socket\n");
+      free(parser);
       sockets_remove_socket(socket);
       close(socket);
+      return;
+    }
+
+    if (state->proxy_finished) {
+      free(parser);
       return;
     }
   }
