@@ -16,6 +16,10 @@
 #define PROTOCOL_VERSION_STR "HTTP/1.0"
 #define DEF_LEN(str) sizeof(str) - 1
 
+/**
+ * Callback that, when notified of the possibility of writing to the socket,
+ * sends new data to the socket.
+ */
 static void client_output_handler(int socket, void* arg) {
   handler_state_t* state = (handler_state_t*)arg;
 
@@ -31,6 +35,15 @@ static void client_output_handler(int socket, void* arg) {
   }
 }
 
+/**
+ * Saves the data that required to send to client.
+ *
+ * @param state Current state.
+ * @param buff Source buffer.
+ * @param len Count of bytes from buffer.
+ *
+ * @return {@code true} if data saved.
+ */
 static bool send_to_client(handler_state_t* state,
                            const char* buff,
                            size_t len) {
@@ -42,12 +55,19 @@ static bool send_to_client(handler_state_t* state,
   return true;
 }
 
+/**
+ * @param code HTTP code num.
+ * @param res Return arg, that stores HTTP code string representation.
+ */
 static void http_code_to_str(int code, char res[3]) {
   res[2] = '0' + code % 10;
   res[1] = '0' + code % 100 / 10;
   res[0] = '0' + code / 100;
 }
 
+/**
+ * Handles responce HTTP status from proxying target.
+ */
 static int handle_response_status(http_parser* parser,
                                   const char* at,
                                   size_t len) {
@@ -80,6 +100,9 @@ static int handle_response_status(http_parser* parser,
   return result ? 0 : 1;
 }
 
+/**
+ * Handles responce header field from proxying target.
+ */
 static int handle_response_header_field(http_parser* parser,
                                         const char* at,
                                         size_t len) {
@@ -110,6 +133,9 @@ static int handle_response_header_field(http_parser* parser,
   return 0;
 }
 
+/**
+ * Handles responce header value from proxying target.
+ */
 static int handle_response_header_value(http_parser* parser,
                                         const char* at,
                                         size_t len) {
@@ -125,6 +151,9 @@ static int handle_response_header_value(http_parser* parser,
   return 0;
 }
 
+/**
+ * Handles responce headers complete part from proxying target.
+ */
 static int handle_response_headers_complete(http_parser* parser) {
   handler_state_t* state = (handler_state_t*)parser->data;
 
@@ -142,6 +171,9 @@ static int handle_response_headers_complete(http_parser* parser) {
   return 0;
 }
 
+/**
+ * Handles responce body.
+ */
 static int handle_response_body(http_parser* parser,
                                 const char* at,
                                 size_t len) {
@@ -155,6 +187,9 @@ static int handle_response_body(http_parser* parser,
   return 0;
 }
 
+/**
+ * Handles responce message complete and close proxying target socket.
+ */
 static int handle_response_message_complete(http_parser* parser) {
   handler_state_t* state = (handler_state_t*)parser->data;
   state->proxy_finished = true;

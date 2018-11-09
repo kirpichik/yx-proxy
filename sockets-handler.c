@@ -27,8 +27,16 @@ typedef struct sockets_state {
 
 static void remove_socket_at(size_t);
 
+/**
+ * Global sockets state.
+ */
 static sockets_state_t state;
 
+/**
+ * Initializes socket processing.
+ *
+ * @param server_socket Socket for receiving new clients.
+ */
 static void init_sockets_state(int server_socket) {
   // Not required if state is global, but still do it for the future.
   memset(state.polls, 0, sizeof(state.polls));
@@ -133,6 +141,13 @@ bool sockets_add_socket(int socket) {
   return true;
 }
 
+/**
+ * Looking for a socket in the registered list.
+ *
+ * @param socket Required socket.
+ *
+ * @return Required socket position or {@code -1}.
+ */
 static ssize_t find_socket(int socket) {
   for (size_t i = 0; i < state.polls_count; i++)
     if (socket == state.polls[i].fd)

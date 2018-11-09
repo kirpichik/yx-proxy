@@ -17,6 +17,8 @@
 
 #define BUFFER_SIZE 1024
 #define DEFAULT_HTTP_PORT 80
+
+// Strings for HTTP protocol
 #define HEADER_CONNECTION "Connection"
 #define HEADER_HOST "Host"
 #define HEADER_CONNECTION_CLOSE "close"
@@ -24,6 +26,10 @@
 
 #define DEF_LEN(str) sizeof(str) - 1
 
+/**
+ * Callback that, when notified of the possibility of writing to the socket,
+ * sends new data to the socket.
+ */
 static void target_output_handler(int socket, void* arg) {
   handler_state_t* state = (handler_state_t*)arg;
 
@@ -33,6 +39,15 @@ static void target_output_handler(int socket, void* arg) {
   }
 }
 
+/**
+ * Saves the data that required to send to proxying target.
+ *
+ * @param state Current state.
+ * @param buff Source buffer.
+ * @param len Count of bytes from buffer.
+ *
+ * @return {@code true} if data saved.
+ */
 static bool send_to_target(handler_state_t* state,
                            const char* buff,
                            size_t len) {
@@ -44,6 +59,9 @@ static bool send_to_target(handler_state_t* state,
   return true;
 }
 
+/**
+ * @return Method string name from http-parser code id.
+ */
 static char* get_method_by_id(int id) {
   switch (id) {
     case 0:
@@ -61,6 +79,14 @@ static char* get_method_by_id(int id) {
   }
 }
 
+/**
+ * Dumps initial request line from client to proxying target.
+ *
+ * @param state Current state.
+ * @param method String name of request method.
+ *
+ * @return {@code true} if initial line successfully sent.
+ */
 static bool dump_initial_line(handler_state_t* state, char* method) {
   if (method == NULL)
     return false;
@@ -94,6 +120,13 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   return result;
 }
 
+/**
+ * Resolves hostname to IP-address.
+ *
+ * @param hostname Required hostname.
+ *
+ * @return IP-address struct.
+ */
 static struct in_addr* resolve_hostname(char* hostname) {
   struct hostent* entry = gethostbyname(hostname);
   if (entry == NULL)
@@ -102,6 +135,15 @@ static struct in_addr* resolve_hostname(char* hostname) {
   return (struct in_addr*)entry->h_addr_list[0];
 }
 
+/**
+ * Establish connection to proxying target at required hostname and port.
+ * Also creates target input handler and parser.
+ *
+ * @param state Current state.
+ * @param host hostname[:port]
+ *
+ * @return {@code true} if successfully established.
+ */
 static bool establish_target_connection(handler_state_t* state, char* host) {
   struct sockaddr_in addr;
   struct in_addr* resolved;
@@ -180,6 +222,9 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
   return true;
 }
 
+/**
+ * Handles request URL input data.
+ */
 static int handle_request_url(http_parser* parser, const char* at, size_t len) {
   handler_state_t* state = (handler_state_t*)parser->data;
 
@@ -191,6 +236,9 @@ static int handle_request_url(http_parser* parser, const char* at, size_t len) {
   return 0;
 }
 
+/**
+ * Finalize request header.
+ */
 static bool handle_finished_header(http_parser* parser) {
   handler_state_t* state = (handler_state_t*)parser->data;
   header_entry_t* header = state->buffered_headers;
@@ -222,6 +270,9 @@ static bool handle_finished_header(http_parser* parser) {
   return true;
 }
 
+/**
+ * Handles request header field input data.
+ */
 static int handle_request_header_field(http_parser* parser,
                                        const char* at,
                                        size_t len) {
@@ -249,6 +300,9 @@ static int handle_request_header_field(http_parser* parser,
   return 0;
 }
 
+/**
+ * Handles request header value input data.
+ */
 static int handle_request_header_value(http_parser* parser,
                                        const char* at,
                                        size_t len) {
@@ -264,6 +318,9 @@ static int handle_request_header_value(http_parser* parser,
   return 0;
 }
 
+/**
+ * Handles request headers complete part.
+ */
 static int handle_request_headers_complete(http_parser* parser) {
   handler_state_t* state = (handler_state_t*)parser->data;
 
@@ -278,6 +335,9 @@ static int handle_request_headers_complete(http_parser* parser) {
   return 0;
 }
 
+/**
+ * Handles request body.
+ */
 static int handle_request_body(http_parser* parser,
                                const char* at,
                                size_t len) {
