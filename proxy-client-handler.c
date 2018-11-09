@@ -96,7 +96,7 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
   size_t url_len = strlen(state->url.str);
   size_t len = prefix_len + url_len + suffix_len;
 
-  char* output = (char*)malloc(len);
+  char* output = (char*)malloc(len + 1);
   if (output == NULL)
     return false;
 

@@ -71,8 +71,6 @@ int sockets_poll_loop(int server_socket) {
   int count;
   int revents;
   int socket;
-  struct sockaddr addr;
-  socklen_t sock_len;
   init_sockets_state(server_socket);
 
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
@@ -94,7 +92,7 @@ int sockets_poll_loop(int server_socket) {
       // Handle server socket
       if (i == 0) {
         if (revents & POLLPRI || revents & POLLIN) {
-          socket = accept(server_socket, &addr, &sock_len);
+          socket = accept(server_socket, NULL, NULL);
           fcntl(socket, F_SETFL, O_NONBLOCK);
 #ifdef _PROXY_DEBUG
           fprintf(stderr, "Accept new client socket.\n");

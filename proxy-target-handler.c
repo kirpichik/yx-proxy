@@ -79,7 +79,7 @@ static int handle_response_status(http_parser* parser,
 
   // "<version> <code> <desc>\r\n"
   size_t size = DEF_LEN(PROTOCOL_VERSION_STR) + sizeof(code) + len + 4;
-  char* output = (char*)malloc(size);
+  char* output = (char*)malloc(size + 1);
 
   memcpy(output, PROTOCOL_VERSION_STR, DEF_LEN(PROTOCOL_VERSION_STR));
   output[DEF_LEN(PROTOCOL_VERSION_STR)] = ' ';
