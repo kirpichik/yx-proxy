@@ -35,12 +35,14 @@ static void remove_socket_at(size_t);
 static sockets_state_t state;
 
 static void interrupt_signal(int sig) {
-  for (size_t i = 0; i < state.polls_count; i++) {
-    callback_t* cb = &state.hup_callbacks[i];
+  close(state.polls[0].fd);
+
+  while (state.polls_count --> 1) {
+    callback_t* cb = &state.hup_callbacks[1];
     if (cb->callback == NULL)
-      close(state.polls[i].fd);
+      close(state.polls[1].fd);
     else
-      cb->callback(state.polls[i].fd, cb->arg);
+      cb->callback(state.polls[1].fd, cb->arg);
   }
 
   printf("Server closed.\n");
@@ -129,16 +131,19 @@ int sockets_poll_loop(int server_socket) {
         callback_t* cb = &state.hup_callbacks[i];
         cb->callback(state.polls[i].fd, cb->arg);
         remove_socket_at(i);
+        i--;
       }
 
       if (revents & POLLNVAL) {
         fprintf(stderr, "Socket %d nval\n", state.polls[i].fd);
         remove_socket_at(i);
+        i--;
       }
 
       if (revents & POLLERR) {
         fprintf(stderr, "Socket %d error\n", state.polls[i].fd);
         remove_socket_at(i);
+        i--;
       }
     }
   }
