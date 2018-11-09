@@ -51,6 +51,8 @@ static void http_code_to_str(int code, char res[3]) {
 static int handle_response_status(http_parser* parser,
                                   const char* at,
                                   size_t len) {
+  // FIXME - repeatable function call
+  
   handler_state_t* state = (handler_state_t*)parser->data;
   char code[3];
   http_code_to_str(parser->status_code, code);
@@ -66,6 +68,11 @@ static int handle_response_status(http_parser* parser,
   memcpy(output + DEF_LEN(PROTOCOL_VERSION_STR) + sizeof(code) + 2, at, len);
   output[size - 2] = '\r';
   output[size - 1] = '\n';
+  
+#ifdef _PROXY_DEBUG
+  output[size] = '\0';
+  fprintf(stderr, "Responce status %d sent.\n", parser->status_code);
+#endif
 
   bool result = send_to_client(state, output, size);
   free(output);
@@ -127,6 +134,10 @@ static int handle_response_headers_complete(http_parser* parser) {
     dump_buffered_headers(state, &send_to_client);
   }
   send_to_client(state, "\r\n\r\n", 4);
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Responce headers complete.\n");
+#endif
 
   return 0;
 }
@@ -150,6 +161,10 @@ static int handle_response_message_complete(http_parser* parser) {
   sockets_remove_socket(state->target_socket);
   close(state->target_socket);
   state->target_socket = -1;
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Responce message complete.\n");
+#endif
 
   return 0;
 }

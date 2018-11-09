@@ -7,6 +7,7 @@
 
 typedef struct cache_entry_reader {
   void (*callback)(char* data, size_t len);
+  void* data;
   struct cache_entry_reader* next;
 } cache_entry_reader_t;
 

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "http-parser.h"
 #include "proxy-handler.h"
@@ -81,6 +82,11 @@ static bool dump_initial_line(handler_state_t* state, char* method) {
          suffix_len - 1);
   output[len - 2] = '\r';
   output[len - 1] = '\n';
+  
+#ifdef _PROXY_DEBUG
+  output[len] = '\0';
+  fprintf(stderr, "Dump initial line: \"%s\"\n", output);
+#endif
 
   bool result = send_to_target(state, output, len);
   free(output);
@@ -115,6 +121,10 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
     perror("Cannot create target socket");
     return false;
   }
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Resolving %s...\n", hostname);
+#endif
 
   if ((resolved = resolve_hostname(hostname)) == NULL) {
     fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
@@ -124,6 +134,10 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
       free(hostname);
     return false;
   }
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Hostname %s resolved as %s\n", hostname, inet_ntoa(*((struct in_addr*)resolved)));
+#endif
 
   addr.sin_addr.s_addr = *((in_addr_t*)resolved);
   addr.sin_family = AF_INET;
@@ -139,6 +153,10 @@ static bool establish_target_connection(handler_state_t* state, char* host) {
     state->target_socket = -1;
     return false;
   }
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Connection established with %s\n", hostname);
+#endif
 
   http_parser* parser = (http_parser*)malloc(sizeof(http_parser));
   if (parser == NULL) {
@@ -252,6 +270,10 @@ static int handle_request_headers_complete(http_parser* parser) {
   pstring_finalize(&state->url);
   handle_finished_header(parser);
   send_to_target(state, "\r\n\r\n", 4);
+  
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Request headers complete.\n");
+#endif
 
   return 0;
 }
