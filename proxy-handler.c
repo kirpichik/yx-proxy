@@ -156,3 +156,7 @@ void socket_hup_handler(int socket, void* arg) {
   handler_state_free(state);
   free(parser);
 }
+
+void interrupt_socket_handling(void* arg_input, void* arg_output, void* arg_hup) {
+  
+}

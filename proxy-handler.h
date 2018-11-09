@@ -74,4 +74,9 @@ void handler_state_free(handler_state_t* state);
  */
 void socket_hup_handler(int socket, void* arg);
 
+/**
+ * Cleanup memory for closed socket and its handlers.
+ */
+void interrupt_socket_handling(void* arg_input, void* arg_output, void* arg_hup);
+
 #endif

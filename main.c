@@ -1,5 +1,4 @@
 #include <netinet/in.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -35,8 +34,6 @@ int main(int argc, char* argv[]) {
   }
 
   fprintf(stderr, "Server socket bound.\n");
-
-  signal(SIGPIPE, SIG_IGN);
 
   return sockets_poll_loop(server_socket);
 }

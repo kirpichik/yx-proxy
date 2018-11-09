@@ -5,6 +5,8 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
 
 #include "proxy-handler.h"
 
@@ -32,6 +34,19 @@ static void remove_socket_at(size_t);
  */
 static sockets_state_t state;
 
+static void interrupt_signal(int sig) {
+  for (size_t i = 0; i < state.polls_count; i++) {
+    callback_t* cb = &state.hup_callbacks[i];
+    if (cb->callback == NULL)
+      close(state.polls[i].fd);
+    else
+      cb->callback(state.polls[i].fd, cb->arg);
+  }
+
+  printf("Server closed.\n");
+  exit(0);
+}
+
 /**
  * Initializes socket processing.
  *
@@ -47,6 +62,9 @@ static void init_sockets_state(int server_socket) {
   state.polls_count = 1;
   state.polls[0].fd = server_socket;
   state.polls[0].events = POLLIN | POLLPRI;
+  
+  signal(SIGPIPE, SIG_IGN);
+  signal(SIGINT, &interrupt_signal);
 }
 
 int sockets_poll_loop(int server_socket) {
@@ -126,7 +144,9 @@ int sockets_poll_loop(int server_socket) {
       }
     }
   }
-
+  
+  perror("Cannot handle new clients");
+  interrupt_signal(0);
   return -1;
 }
 
