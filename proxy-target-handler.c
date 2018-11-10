@@ -12,7 +12,7 @@
 #include "proxy-target-handler.h"
 
 #define BUFFER_SIZE 1024
-#define PROTOCOL_VERSION_STR "HTTP/1.0"
+#define PROTOCOL_VERSION_STR "HTTP/1.1"
 #define DEF_LEN(str) (sizeof(str) - 1)
 
 /**
@@ -189,7 +189,7 @@ static int handle_response_headers_complete(http_parser* parser) {
     pstring_finalize(&state->headers->value);
     dump_buffered_headers(state);
   }
-  send_to_client(state, "\r\n\r\n", 4);
+  send_to_client(state, "\r\n", 2);
   
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Responce headers complete.\n");

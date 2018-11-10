@@ -255,7 +255,7 @@ static int handle_request_headers_complete(http_parser* parser) {
   pstring_finalize(&state->url);
   if (!handle_finished_header(parser))
     return 1;
-  send_to_target(state, "\r\n\r\n", 4);
+  send_to_target(state, "\r\n", 2);
   
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Request headers complete.\n");
