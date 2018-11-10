@@ -60,3 +60,8 @@ void pstring_finalize(pstring_t* str) {
     return;
   str->str[str->len] = '\0';
 }
+
+void pstring_free(pstring_t* str) {
+  if (str != NULL && str->str != NULL)
+    free(str->str);
+}

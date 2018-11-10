@@ -6,7 +6,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "http-parser.h"
 #include "proxy-handler.h"
 #include "sockets-handler.h"
 
@@ -14,24 +13,22 @@
 
 #define BUFFER_SIZE 1024
 #define PROTOCOL_VERSION_STR "HTTP/1.0"
-#define DEF_LEN(str) sizeof(str) - 1
+#define DEF_LEN(str) (sizeof(str) - 1)
 
 /**
  * Callback that, when notified of the possibility of writing to the socket,
  * sends new data to the socket.
  */
 static void client_output_handler(int socket, void* arg) {
-  handler_state_t* state = (handler_state_t*)arg;
+  target_state_t* state = (target_state_t*)arg;
 
-  if (send_pstring(socket, &state->client_outbuff)) {
+  if (send_pstring(socket, &state->outbuff)) {
     if (state->proxy_finished) {
-      sockets_remove_socket(state->client_socket);
-      close(state->client_socket);
-      handler_state_free(state);
+      target_hup_handler(state->socket, state);
       return;
     }
-    sockets_cancel_out_handle(state->client_socket);
-    sockets_enable_in_handle(state->target_socket);
+    sockets_cancel_out_handle(state->client->socket);
+    sockets_enable_in_handle(state->socket);
   }
 }
 
@@ -44,14 +41,14 @@ static void client_output_handler(int socket, void* arg) {
  *
  * @return {@code true} if data saved.
  */
-static bool send_to_client(handler_state_t* state,
+static bool send_to_client(target_state_t* state,
                            const char* buff,
                            size_t len) {
-  if (!pstring_append(&state->client_outbuff, buff, len))
+  if (!pstring_append(&state->outbuff, buff, len))
     return false;
   // TODO - optimisation: try to send, before this
-  sockets_set_out_handler(state->client_socket, &client_output_handler, state);
-  sockets_cancel_in_handle(state->target_socket);
+  sockets_set_out_handler(state->client->socket, &client_output_handler, state);
+  sockets_cancel_in_handle(state->socket);
   return true;
 }
 
@@ -73,7 +70,7 @@ static int handle_response_status(http_parser* parser,
                                   size_t len) {
   // FIXME - repeatable function call
   
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
   char code[3];
   http_code_to_str(parser->status_code, code);
 
@@ -101,34 +98,65 @@ static int handle_response_status(http_parser* parser,
 }
 
 /**
+ * Dumps all buffered headers to client.
+ *
+ * @param state Current handler state.
+ *
+ * @return {@code true} if all headers successfully dumped.
+ */
+static bool dump_buffered_headers(target_state_t* state) {
+  header_entry_t* entry = state->headers;
+  char* output;
+  size_t len;
+  
+  while (entry) {
+    output = build_header_string(entry, &len);
+    if (output == NULL)
+      return false;
+    
+    if (!send_to_client(state, output, len)) {
+      free(output);
+      return false;
+    }
+    
+    free(output);
+    state->headers = entry->next;
+    pstring_free(&entry->key);
+    pstring_free(&entry->value);
+    free(entry);
+    entry = state->headers;
+  }
+  
+  return true;
+}
+
+/**
  * Handles responce header field from proxying target.
  */
 static int handle_response_header_field(http_parser* parser,
                                         const char* at,
                                         size_t len) {
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
 
-  pstring_finalize(&state->url);
-
-  if (state->buffered_headers) {               // Previous header exists
-    if (state->buffered_headers->value.str) {  // Value stored, creating new
-      if (state->buffered_headers != NULL) {
-        pstring_finalize(&state->buffered_headers->value);
-        dump_buffered_headers(state, &send_to_client);
+  if (state->headers) {               // Previous header exists
+    if (state->headers->value.str) {  // Value stored, creating new
+      if (state->headers != NULL) {
+        pstring_finalize(&state->headers->value);
+        dump_buffered_headers(state);
       }
       header_entry_t* entry = create_header_entry(at, len);
       if (entry == NULL)
         return 1;
-      entry->next = state->buffered_headers;
-      state->buffered_headers = entry;
+      entry->next = state->headers;
+      state->headers = entry;
     } else {  // Key append
-      if (!pstring_append(&state->buffered_headers->key, at, len)) {
+      if (!pstring_append(&state->headers->key, at, len)) {
         perror("Cannot append header key");
         return 1;
       }
     }
   } else
-    state->buffered_headers = create_header_entry(at, len);
+    state->headers = create_header_entry(at, len);
 
   return 0;
 }
@@ -139,11 +167,11 @@ static int handle_response_header_field(http_parser* parser,
 static int handle_response_header_value(http_parser* parser,
                                         const char* at,
                                         size_t len) {
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
 
-  pstring_finalize(&state->buffered_headers->key);
+  pstring_finalize(&state->headers->key);
 
-  if (!pstring_append(&state->buffered_headers->value, at, len)) {
+  if (!pstring_append(&state->headers->value, at, len)) {
     perror("Cannot store client header value");
     return 1;
   }
@@ -155,12 +183,11 @@ static int handle_response_header_value(http_parser* parser,
  * Handles responce headers complete part from proxying target.
  */
 static int handle_response_headers_complete(http_parser* parser) {
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
 
-  pstring_finalize(&state->url);
-  if (state->buffered_headers != NULL) {
-    pstring_finalize(&state->buffered_headers->value);
-    dump_buffered_headers(state, &send_to_client);
+  if (state->headers != NULL) {
+    pstring_finalize(&state->headers->value);
+    dump_buffered_headers(state);
   }
   send_to_client(state, "\r\n\r\n", 4);
   
@@ -177,7 +204,7 @@ static int handle_response_headers_complete(http_parser* parser) {
 static int handle_response_body(http_parser* parser,
                                 const char* at,
                                 size_t len) {
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
 
   if (!send_to_client(state, at, len)) {
     fprintf(stderr, "Cannot proxy target data body to client socket\n");
@@ -191,11 +218,9 @@ static int handle_response_body(http_parser* parser,
  * Handles responce message complete and close proxying target socket.
  */
 static int handle_response_message_complete(http_parser* parser) {
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
+
   state->proxy_finished = true;
-  sockets_remove_socket(state->target_socket);
-  close(state->target_socket);
-  state->target_socket = -1;
   
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Responce message complete.\n");
@@ -219,7 +244,7 @@ static http_parser_settings http_response_callbacks = {
 
 void target_input_handler(int socket, void* arg) {
   http_parser* parser = (http_parser*)arg;
-  handler_state_t* state = (handler_state_t*)parser->data;
+  target_state_t* state = (target_state_t*)parser->data;
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
@@ -236,8 +261,8 @@ void target_input_handler(int socket, void* arg) {
       }
       return;
     } else if (result == 0) {
-      if (state->proxy_finished)
-        free(parser);
+      if (errno != EAGAIN)
+        target_hup_handler(socket, (target_state_t*)parser->data);
       return;
     }
 
@@ -245,15 +270,35 @@ void target_input_handler(int socket, void* arg) {
         http_parser_execute(parser, &http_response_callbacks, buff, result);
     if (nparsed != result) {
       fprintf(stderr, "Cannot parse http input from target socket\n");
-      free(parser);
-      sockets_remove_socket(socket);
-      close(socket);
+      target_hup_handler(socket, (target_state_t*)parser->data);
       return;
     }
-
-    if (state->proxy_finished) {
-      free(parser);
+    
+    if (state->proxy_finished)
       return;
-    }
   }
+}
+
+void target_hup_handler(int socket, void* arg) {
+  target_state_t* state = (target_state_t*) arg;
+  sockets_remove_socket(socket);
+
+#ifdef _PROXY_DEBUG
+  if (!state->proxy_finished)
+    fprintf(stderr, "Target socket hup.\n");
+#endif
+  
+  if (state->client != NULL) {
+    close(state->client->socket);
+    sockets_remove_socket(state->client->socket);
+    pstring_free(&state->client->outbuff);
+    free_header_entry_list(state->client->headers);
+    pstring_free(&state->client->url);
+    free(state->client);
+  }
+
+  close(state->socket);
+  pstring_free(&state->outbuff);
+  free_header_entry_list(state->headers);
+  free(state);
 }

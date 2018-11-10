@@ -7,4 +7,9 @@
  */
 void client_input_handler(int socket, void* arg);
 
+/**
+ * Callback for client socket hup.
+ */
+void client_hup_handler(int socket, void* arg);
+
 #endif

@@ -1,6 +1,7 @@
 
 #include <stdbool.h>
 
+#include "http-parser.h"
 #include "pstring.h"
 
 #ifndef _PROXY_HANDLER_H
@@ -12,15 +13,25 @@ typedef struct header_entry {
   struct header_entry* next;
 } header_entry_t;
 
-typedef struct handler_state {
-  int client_socket;
-  int target_socket;
-  pstring_t target_outbuff;
-  pstring_t client_outbuff;
+struct target_state;
+
+typedef struct client_state {
+  int socket;
+  http_parser parser;
+  pstring_t outbuff;
+  header_entry_t* headers;
+  struct target_state* target;
   pstring_t url;
-  header_entry_t* buffered_headers;
+} client_state_t;
+
+typedef struct target_state {
+  int socket;
+  http_parser parser;
+  pstring_t outbuff;
+  header_entry_t* headers;
+  struct client_state* client;
   bool proxy_finished;
-} handler_state_t;
+} target_state_t;
 
 /**
  * Allocates new header entry.
@@ -33,11 +44,29 @@ typedef struct handler_state {
 header_entry_t* create_header_entry(const char* key, size_t key_len);
 
 /**
+ * Free all memory allocated to headers list.
+ *
+ * @param entry List head.
+ */
+void free_header_entry_list(header_entry_t* entry);
+
+/**
  * Accepts new client at required socket.
  *
  * @param socket Socket.
  */
 void proxy_accept_client(int socket);
+
+/**
+ * Establish connection to proxying target at required hostname and port.
+ * Also creates target input handler and parser.
+ *
+ * @param state Current state.
+ * @param host hostname[:port]
+ *
+ * @return {@code true} if successfully established.
+ */
+bool proxy_establish_connection(client_state_t* state, char* host);
 
 /**
  * Sends string to the socket.
@@ -50,33 +79,13 @@ void proxy_accept_client(int socket);
 bool send_pstring(int socket, pstring_t* buff);
 
 /**
- * Dumps all buffered headers using sender function.
+ * Allocates and build header string from header entry.
  *
- * @param state Current handler state.
- * @param sender Sender function.
+ * @param entry Header entry.
+ * @param result_len Result string length.
  *
- * @return {@code true} if all headers successfully dumped using sender function.
+ * @return New header string allocated on heap or {@code NULL} if not enougth memory.
  */
-bool dump_buffered_headers(handler_state_t* state,
-                           bool (*sender)(handler_state_t*,
-                                          const char*,
-                                          size_t));
-
-/**
- * Free memory allocated for handler state.
- *
- * @param state State pointer.
- */
-void handler_state_free(handler_state_t* state);
-
-/**
- * Callback handler for sockets hup.
- */
-void socket_hup_handler(int socket, void* arg);
-
-/**
- * Cleanup memory for closed socket and its handlers.
- */
-void interrupt_socket_handling(void* arg_input, void* arg_output, void* arg_hup);
+char* build_header_string(header_entry_t* entry, size_t* result_len);
 
 #endif

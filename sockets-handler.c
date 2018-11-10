@@ -39,7 +39,7 @@ static void interrupt_signal(int sig) {
 
   while (state.polls_count --> 1) {
     callback_t* cb = &state.hup_callbacks[1];
-    if (cb->callback == NULL)
+    if (cb->callback == NULL) // For server socket
       close(state.polls[1].fd);
     else
       cb->callback(state.polls[1].fd, cb->arg);
@@ -78,7 +78,7 @@ int sockets_poll_loop(int server_socket) {
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
   listen(server_socket, POLL_SIZE);
 
-  while ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) != -1) {
+  while ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) != -2) {
     for (size_t i = 0; i < state.polls_count; i++) {
       if (count == 0)
         break;
@@ -261,12 +261,22 @@ bool sockets_cancel_out_handle(int socket) {
 
 static void remove_socket_at(size_t pos) {
   state.polls_count--;
+
   memcpy(&state.polls[pos], &state.polls[state.polls_count],
          sizeof(struct pollfd));
+  memset(&state.polls[state.polls_count], 0, sizeof(struct pollfd));
+
   memcpy(&state.input_callbacks[pos], &state.input_callbacks[state.polls_count],
          sizeof(callback_t));
+  memset(&state.input_callbacks[state.polls_count], 0, sizeof(callback_t));
+
   memcpy(&state.output_callbacks[pos],
          &state.output_callbacks[state.polls_count], sizeof(callback_t));
+  memset(&state.output_callbacks[state.polls_count], 0, sizeof(callback_t));
+
+  memcpy(&state.hup_callbacks[pos],
+         &state.hup_callbacks[state.polls_count], sizeof(callback_t));
+  memset(&state.hup_callbacks[state.polls_count], 0, sizeof(callback_t));
 }
 
 bool sockets_remove_socket(int socket) {

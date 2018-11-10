@@ -56,4 +56,11 @@ bool pstring_substring(pstring_t* str, size_t begin);
  */
 void pstring_finalize(pstring_t* str);
 
+/**
+ * Free memory for string if it required.
+ *
+ * @param str Required string.
+ */
+void pstring_free(pstring_t* str);
+
 #endif
