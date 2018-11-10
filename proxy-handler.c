@@ -1,12 +1,12 @@
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <netdb.h>
 
 #include "proxy-client-handler.h"
 #include "proxy-target-handler.h"
@@ -41,7 +41,7 @@ void free_header_entry_list(header_entry_t* entry) {
   while (entry) {
     pstring_free(&entry->key);
     pstring_free(&entry->value);
-    
+
     temp = entry->next;
     free(entry);
     entry = temp;
@@ -87,7 +87,7 @@ static struct in_addr* resolve_hostname(char* hostname) {
   struct hostent* entry = gethostbyname(hostname);
   if (entry == NULL)
     return NULL;
-  
+
   return (struct in_addr*)entry->h_addr_list[0];
 }
 
@@ -97,25 +97,25 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   char* hostname = host;
   int port = DEFAULT_HTTP_PORT;
   char* split_pos = strrchr(host, ':');
-  
+
   if (split_pos != NULL) {
     port = atoi(split_pos + (-strlen(host)));
     hostname = (char*)malloc((size_t)(split_pos - host + 1));
     memcpy(hostname, host, (size_t)(split_pos - host));
     hostname[split_pos - host] = '\0';
   }
-  
+
   state->target = (target_state_t*)malloc(sizeof(target_state_t));
   if (state->target == NULL) {
     perror("Cannot allocate target state");
     return false;
   }
-  
+
   state->target->client = state;
   pstring_init(&state->target->outbuff);
   state->target->headers = NULL;
   state->target->proxy_finished = false;
-  
+
   state->target->socket = socket(AF_INET, SOCK_STREAM, 0);
   if (state->target->socket < 0) {
     perror("Cannot create target socket");
@@ -123,11 +123,11 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     state->target = NULL;
     return false;
   }
-  
+
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Resolving %s...\n", hostname);
 #endif
-  
+
   if ((resolved = resolve_hostname(hostname)) == NULL) {
     fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
     close(state->target->socket);
@@ -137,33 +137,35 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
       free(hostname);
     return false;
   }
-  
+
 #ifdef _PROXY_DEBUG
-  fprintf(stderr, "Hostname %s resolved as %s\n", hostname, inet_ntoa(*((struct in_addr*)resolved)));
+  fprintf(stderr, "Hostname %s resolved as %s\n", hostname,
+          inet_ntoa(*((struct in_addr*)resolved)));
 #endif
-  
+
   addr.sin_addr.s_addr = *((in_addr_t*)resolved);
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
-  
+
   if (hostname != host)
     free(hostname);
-  
-  if (connect(state->target->socket, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+
+  if (connect(state->target->socket, (struct sockaddr*)&addr, sizeof(addr)) ==
+      -1) {
     perror("Cannot connect to target");
     close(state->target->socket);
     free(state->target);
     state->target = NULL;
     return false;
   }
-  
+
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Connection established with %s\n", hostname);
 #endif
 
   http_parser_init(&state->target->parser, HTTP_RESPONSE);
   state->target->parser.data = state->target;
-  
+
   if (!sockets_add_socket(state->target->socket)) {
     fprintf(stderr, "Too many file descriptors\n");
     close(state->target->socket);
@@ -171,10 +173,12 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     state->target = NULL;
     return false;
   }
-  
-  sockets_set_hup_handler(state->target->socket, &target_hup_handler, state->target);
-  sockets_set_in_handler(state->target->socket, &target_input_handler, &state->target->parser);
-  
+
+  sockets_set_hup_handler(state->target->socket, &target_hup_handler,
+                          state->target);
+  sockets_set_in_handler(state->target->socket, &target_input_handler,
+                         &state->target->parser);
+
   return true;
 }
 
@@ -212,7 +216,7 @@ char* build_header_string(header_entry_t* entry, size_t* result_len) {
   memcpy(output + entry->key.len + 2, entry->value.str, entry->value.len);
   output[len - 2] = '\r';
   output[len - 1] = '\n';
-  
+
   (*result_len) = len;
   return output;
 }

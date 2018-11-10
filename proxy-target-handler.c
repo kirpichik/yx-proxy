@@ -69,7 +69,7 @@ static int handle_response_status(http_parser* parser,
                                   const char* at,
                                   size_t len) {
   // FIXME - repeatable function call
-  
+
   target_state_t* state = (target_state_t*)parser->data;
   char code[3];
   http_code_to_str(parser->status_code, code);
@@ -85,7 +85,7 @@ static int handle_response_status(http_parser* parser,
   memcpy(output + DEF_LEN(PROTOCOL_VERSION_STR) + sizeof(code) + 2, at, len);
   output[size - 2] = '\r';
   output[size - 1] = '\n';
-  
+
 #ifdef _PROXY_DEBUG
   output[size] = '\0';
   fprintf(stderr, "Responce status %d sent.\n", parser->status_code);
@@ -108,17 +108,17 @@ static bool dump_buffered_headers(target_state_t* state) {
   header_entry_t* entry = state->headers;
   char* output;
   size_t len;
-  
+
   while (entry) {
     output = build_header_string(entry, &len);
     if (output == NULL)
       return false;
-    
+
     if (!send_to_client(state, output, len)) {
       free(output);
       return false;
     }
-    
+
     free(output);
     state->headers = entry->next;
     pstring_free(&entry->key);
@@ -126,7 +126,7 @@ static bool dump_buffered_headers(target_state_t* state) {
     free(entry);
     entry = state->headers;
   }
-  
+
   return true;
 }
 
@@ -190,7 +190,7 @@ static int handle_response_headers_complete(http_parser* parser) {
     dump_buffered_headers(state);
   }
   send_to_client(state, "\r\n", 2);
-  
+
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Responce headers complete.\n");
 #endif
@@ -221,7 +221,7 @@ static int handle_response_message_complete(http_parser* parser) {
   target_state_t* state = (target_state_t*)parser->data;
 
   state->proxy_finished = true;
-  
+
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Responce message complete.\n");
 #endif
@@ -273,21 +273,21 @@ void target_input_handler(int socket, void* arg) {
       target_hup_handler(socket, (target_state_t*)parser->data);
       return;
     }
-    
+
     if (state->proxy_finished)
       return;
   }
 }
 
 void target_hup_handler(int socket, void* arg) {
-  target_state_t* state = (target_state_t*) arg;
+  target_state_t* state = (target_state_t*)arg;
   sockets_remove_socket(socket);
 
 #ifdef _PROXY_DEBUG
   if (!state->proxy_finished)
     fprintf(stderr, "Target socket hup.\n");
 #endif
-  
+
   if (state->client != NULL) {
     close(state->client->socket);
     sockets_remove_socket(state->client->socket);

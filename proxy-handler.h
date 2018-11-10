@@ -74,7 +74,8 @@ bool proxy_establish_connection(client_state_t* state, char* host);
  * @param socket Target socket.
  * @param buff Sending string.
  *
- * @return {@code true} if all string was sent, or store left string as substring of buffer.
+ * @return {@code true} if all string was sent, or store left string as
+ * substring of buffer.
  */
 bool send_pstring(int socket, pstring_t* buff);
 
@@ -84,7 +85,8 @@ bool send_pstring(int socket, pstring_t* buff);
  * @param entry Header entry.
  * @param result_len Result string length.
  *
- * @return New header string allocated on heap or {@code NULL} if not enougth memory.
+ * @return New header string allocated on heap or {@code NULL} if not enougth
+ * memory.
  */
 char* build_header_string(header_entry_t* entry, size_t* result_len);
 

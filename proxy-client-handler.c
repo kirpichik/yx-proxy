@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include "proxy-handler.h"
 #include "sockets-handler.h"
@@ -104,7 +104,7 @@ static bool dump_initial_line(client_state_t* state, char* method) {
          suffix_len - 1);
   output[len - 2] = '\r';
   output[len - 1] = '\n';
-  
+
 #ifdef _PROXY_DEBUG
   output[len] = '\0';
   fprintf(stderr, "Dump initial line: \"%s\"\n", output);
@@ -127,17 +127,17 @@ static bool dump_buffered_headers(client_state_t* state) {
   header_entry_t* entry = state->headers;
   char* output;
   size_t len;
-  
+
   while (entry) {
     output = build_header_string(entry, &len);
     if (output == NULL)
       return false;
-    
+
     if (!send_to_target(state, output, len)) {
       free(output);
       return false;
     }
-    
+
     free(output);
     state->headers = entry->next;
     pstring_free(&entry->key);
@@ -145,7 +145,7 @@ static bool dump_buffered_headers(client_state_t* state) {
     free(entry);
     entry = state->headers;
   }
-  
+
   return true;
 }
 
@@ -256,7 +256,7 @@ static int handle_request_headers_complete(http_parser* parser) {
   if (!handle_finished_header(parser))
     return 1;
   send_to_target(state, "\r\n", 2);
-  
+
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Request headers complete.\n");
 #endif
@@ -328,13 +328,13 @@ void client_input_handler(int socket, void* arg) {
 }
 
 void client_hup_handler(int socket, void* arg) {
-  client_state_t* state = (client_state_t*) arg;
+  client_state_t* state = (client_state_t*)arg;
   sockets_remove_socket(socket);
 
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Client socket hup.\n");
 #endif
-  
+
   if (state->target != NULL) {
     close(state->target->socket);
     sockets_remove_socket(state->target->socket);

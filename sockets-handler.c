@@ -1,12 +1,12 @@
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <signal.h>
-#include <stdlib.h>
 
 #include "proxy-handler.h"
 
@@ -37,9 +37,9 @@ static sockets_state_t state;
 static void interrupt_signal(int sig) {
   close(state.polls[0].fd);
 
-  while (state.polls_count --> 1) {
+  while (state.polls_count-- > 1) {
     callback_t* cb = &state.hup_callbacks[1];
-    if (cb->callback == NULL) // For server socket
+    if (cb->callback == NULL)  // For server socket
       close(state.polls[1].fd);
     else
       cb->callback(state.polls[1].fd, cb->arg);
@@ -64,7 +64,7 @@ static void init_sockets_state(int server_socket) {
   state.polls_count = 1;
   state.polls[0].fd = server_socket;
   state.polls[0].events = POLLIN | POLLPRI;
-  
+
   signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, &interrupt_signal);
 }
@@ -147,7 +147,7 @@ int sockets_poll_loop(int server_socket) {
       }
     }
   }
-  
+
   perror("Cannot handle new clients");
   interrupt_signal(0);
   return -1;
@@ -274,8 +274,8 @@ static void remove_socket_at(size_t pos) {
          &state.output_callbacks[state.polls_count], sizeof(callback_t));
   memset(&state.output_callbacks[state.polls_count], 0, sizeof(callback_t));
 
-  memcpy(&state.hup_callbacks[pos],
-         &state.hup_callbacks[state.polls_count], sizeof(callback_t));
+  memcpy(&state.hup_callbacks[pos], &state.hup_callbacks[state.polls_count],
+         sizeof(callback_t));
   memset(&state.hup_callbacks[state.polls_count], 0, sizeof(callback_t));
 }
 
