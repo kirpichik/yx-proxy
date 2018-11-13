@@ -12,12 +12,14 @@ endif
 SOURCES=main.c\
 				sockets-handler.c\
 				pstring.c\
+				cache.c\
 				proxy-handler.c\
 				proxy-client-handler.c\
 				proxy-target-handler.c\
 				http-parser.c
 HEADERS=sockets-handler.h\
 				pstring.h\
+				cache.h\
 				proxy-handler.h\
 				proxy-client-handler.h\
 				proxy-target-handler.h\
