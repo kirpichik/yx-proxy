@@ -12,7 +12,7 @@
 #include "proxy-target-handler.h"
 
 #define BUFFER_SIZE 1024
-#define PROTOCOL_VERSION_STR "HTTP/1.1"
+#define PROTOCOL_VERSION_STR "HTTP/1.0"
 #define DEF_LEN(str) (sizeof(str) - 1)
 
 /**

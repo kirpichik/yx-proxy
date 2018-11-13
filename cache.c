@@ -1,1 +1,145 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "cache.h"
+
+static cache_t cache;
+
+bool cache_init(void) {
+  // TODO - init for multithreading
+  cache.list = NULL;
+  return true;
+}
+
+int cache_find_or_create(char* url, cache_entry_t** result) {
+  if (url == NULL)
+    return -1;
+  cache_entry_t* entry = cache.list;
+
+  while (entry) {
+    if (!strcmp(url, entry->url)) {
+      (*result) = entry;
+      return 0;
+    }
+
+    entry = entry->next;
+  }
+
+  entry = (cache_entry_t*)malloc(sizeof(cache_entry_t));
+  if (entry == NULL) {
+    perror("Cannot create cache entry");
+    return -1;
+  }
+
+  memset(entry, 0, sizeof(cache_entry_t));
+  pstring_init(&entry->data);
+  entry->url = strdup(url);
+  entry->next = cache.list;
+  cache.list = entry;
+
+  return 1;
+}
+
+cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
+                                            void (*callback)(cache_entry_t*,
+                                                             void*),
+                                            void* arg) {
+  if (entry == NULL || callback == NULL)
+    return NULL;
+
+  cache_entry_reader_t* reader =
+      (cache_entry_reader_t*)malloc(sizeof(cache_entry_reader_t));
+  if (reader == NULL) {
+    perror("Cannot subscribe cache entry reader");
+    return NULL;
+  }
+  reader->callback = callback;
+  reader->arg = arg;
+  reader->next = entry->readers;
+  entry->readers = reader->next;
+
+  return reader;
+}
+
+bool cache_entry_unsubscribe(cache_entry_t* entry,
+                             cache_entry_reader_t* reader) {
+  cache_entry_reader_t* curr;
+  if (entry == NULL || reader == NULL)
+    return false;
+
+  curr = entry->readers;
+  if (entry->readers == reader) {
+    entry->readers = entry->readers->next;
+    free(curr);
+    return true;
+  }
+
+  while (curr) {
+    if (curr->next == reader) {
+      curr->next = reader->next;
+      free(reader);
+      return true;
+    }
+
+    curr = curr->next;
+  }
+
+  return false;
+}
+
+static void readers_foreach(cache_entry_t* entry) {
+  cache_entry_reader_t* reader = entry->readers;
+  while (reader) {
+    reader->callback(entry, reader->arg);
+    reader = reader->next;
+  }
+}
+
+bool cache_entry_append(cache_entry_t* entry, char* data, size_t len) {
+  if (entry == NULL || data == NULL)
+    return false;
+
+  if (!pstring_append(&entry->data, data, len)) {
+    perror("Cannot cache entry data");
+    return false;
+  }
+
+  readers_foreach(entry);
+  return false;
+}
+
+void cache_entry_mark_finished(cache_entry_t* entry) {
+  if (entry != NULL) {
+    entry->finished = true;
+    readers_foreach(entry);
+  }
+}
+
+void cache_entry_drop(cache_entry_t* entry) {
+  // TODO
+  // FIXME - arg reference?
+}
+
+static void readers_free(cache_entry_reader_t* readers) {
+  cache_entry_reader_t* curr = readers;
+  while (curr) {
+    readers = curr->next;
+    free(curr);
+    curr = readers;
+  }
+}
+
+void cache_free(void) {
+  cache_entry_t* curr = cache.list;
+  while (curr) {
+    readers_free(curr->readers);
+    free(curr->url);
+    pstring_free(&curr->data);
+
+    cache.list = curr->next;
+    free(curr);
+    curr = cache.list;
+  }
+}
