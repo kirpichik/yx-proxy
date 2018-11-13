@@ -1,6 +1,7 @@
 
 #include <stdbool.h>
 
+#include "cache.h"
 #include "http-parser.h"
 #include "pstring.h"
 
@@ -19,15 +20,18 @@ typedef struct client_state {
   int socket;
   http_parser parser;
   pstring_t outbuff;
+  pstring_t client_outbuff;
   header_entry_t* headers;
   struct target_state* target;
+  cache_entry_reader_t* reader;
+  cache_entry_t* cache;
+  bool use_cache;
   pstring_t url;
 } client_state_t;
 
 typedef struct target_state {
   int socket;
   http_parser parser;
-  pstring_t outbuff;
   header_entry_t* headers;
   struct client_state* client;
   bool proxy_finished;

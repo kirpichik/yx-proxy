@@ -8,6 +8,7 @@
 
 #include "proxy-handler.h"
 #include "sockets-handler.h"
+#include "cache.h"
 
 #include "proxy-client-handler.h"
 
@@ -46,12 +47,27 @@ static void target_output_handler(int socket, void* arg) {
 static bool send_to_target(client_state_t* state,
                            const char* buff,
                            size_t len) {
+  // Drop output if cache used
+  if (state->use_cache)
+    return true;
+  
   if (!pstring_append(&state->outbuff, buff, len))
     return false;
   // TODO - optimisation: try to send, before this
   sockets_set_out_handler(state->target->socket, &target_output_handler, state);
   sockets_cancel_in_handle(state->socket);
   return true;
+}
+
+/**
+ * Callback that, when notified of the possibility of writing to the socket,
+ * sends new data to the socket.
+ */
+static void client_output_handler(int socket, void* arg) {
+  client_state_t* state = (client_state_t*)arg;
+  
+  if (send_pstring(socket, &state->client_outbuff))
+    sockets_cancel_out_handle(state->socket);
 }
 
 /**
@@ -149,6 +165,35 @@ static bool dump_buffered_headers(client_state_t* state) {
   return true;
 }
 
+static void accept_cache_updates(cache_entry_t* entry, void* arg) {
+  client_state_t* state = (client_state_t*) arg;
+  if (entry->data.str == NULL)
+    return;
+  
+  if (!pstring_append(&state->client_outbuff, entry->data.str + entry->offset, entry->data.len - entry->offset))
+    return;
+  // TODO - optimisation: try to send, before this
+  sockets_set_out_handler(state->socket, &client_output_handler, state);
+  return;
+}
+
+static bool establish_cached_connection(client_state_t* state, char* host) {
+  // FIXME - form url from state->url and host
+  int result = cache_find_or_create(state->url.str, &state->cache);
+  if (result == -1)
+    return false;
+  
+  state->reader = cache_entry_subscribe(state->cache, &accept_cache_updates, state);
+  state->use_cache = true;
+
+  if (result == 1) {
+    state->use_cache = false;
+    return proxy_establish_connection(state, host);
+  }
+  
+  return true;
+}
+
 /**
  * Handles request URL input data.
  */
@@ -182,12 +227,12 @@ static bool handle_finished_header(http_parser* parser) {
 
   pstring_finalize(&header->value);
 
-  // Already connected
-  if (state->target != NULL)
+  // Already connected or cache active
+  if (state->use_cache || state->target != NULL)
     return dump_buffered_headers(state);
 
   if (!strncmp(header->key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
-    if (!proxy_establish_connection(state, header->value.str))
+    if (!establish_cached_connection(state, header->value.str))
       return false;
     if (!dump_initial_line(state, get_method_by_id(parser->method)))
       return false;
@@ -338,11 +383,12 @@ void client_hup_handler(int socket, void* arg) {
   if (state->target != NULL) {
     close(state->target->socket);
     sockets_remove_socket(state->target->socket);
-    pstring_free(&state->target->outbuff);
+    pstring_free(&state->client_outbuff);
     free_header_entry_list(state->target->headers);
     free(state->target);
   }
 
+  cache_entry_unsubscribe(state->cache, state->reader);
   close(state->socket);
   pstring_free(&state->outbuff);
   pstring_free(&state->url);

@@ -16,43 +16,6 @@
 #define DEF_LEN(str) (sizeof(str) - 1)
 
 /**
- * Callback that, when notified of the possibility of writing to the socket,
- * sends new data to the socket.
- */
-static void client_output_handler(int socket, void* arg) {
-  target_state_t* state = (target_state_t*)arg;
-
-  if (send_pstring(socket, &state->outbuff)) {
-    if (state->proxy_finished) {
-      target_hup_handler(state->socket, state);
-      return;
-    }
-    sockets_cancel_out_handle(state->client->socket);
-    sockets_enable_in_handle(state->socket);
-  }
-}
-
-/**
- * Saves the data that required to send to client.
- *
- * @param state Current state.
- * @param buff Source buffer.
- * @param len Count of bytes from buffer.
- *
- * @return {@code true} if data saved.
- */
-static bool send_to_client(target_state_t* state,
-                           const char* buff,
-                           size_t len) {
-  if (!pstring_append(&state->outbuff, buff, len))
-    return false;
-  // TODO - optimisation: try to send, before this
-  sockets_set_out_handler(state->client->socket, &client_output_handler, state);
-  sockets_cancel_in_handle(state->socket);
-  return true;
-}
-
-/**
  * @param code HTTP code num.
  * @param res Return arg, that stores HTTP code string representation.
  */
@@ -91,7 +54,7 @@ static int handle_response_status(http_parser* parser,
   fprintf(stderr, "Responce status %d sent.\n", parser->status_code);
 #endif
 
-  bool result = send_to_client(state, output, size);
+  bool result = cache_entry_append(state->client->cache, output, size);
   free(output);
 
   return result ? 0 : 1;
@@ -114,7 +77,7 @@ static bool dump_buffered_headers(target_state_t* state) {
     if (output == NULL)
       return false;
 
-    if (!send_to_client(state, output, len)) {
+    if (!cache_entry_append(state->client->cache, output, len)) {
       free(output);
       return false;
     }
@@ -189,7 +152,8 @@ static int handle_response_headers_complete(http_parser* parser) {
     pstring_finalize(&state->headers->value);
     dump_buffered_headers(state);
   }
-  send_to_client(state, "\r\n", 2);
+  if (!cache_entry_append(state->client->cache, "\r\n", 2))
+    return 1;
 
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Responce headers complete.\n");
@@ -206,7 +170,7 @@ static int handle_response_body(http_parser* parser,
                                 size_t len) {
   target_state_t* state = (target_state_t*)parser->data;
 
-  if (!send_to_client(state, at, len)) {
+  if (!cache_entry_append(state->client->cache, at, len)) {
     fprintf(stderr, "Cannot proxy target data body to client socket\n");
     return 1;
   }
@@ -262,7 +226,7 @@ void target_input_handler(int socket, void* arg) {
       return;
     } else if (result == 0) {
       if (errno != EAGAIN)
-        target_hup_handler(socket, (target_state_t*)parser->data);
+        target_hup_handler(socket, state);
       return;
     }
 
@@ -274,8 +238,10 @@ void target_input_handler(int socket, void* arg) {
       return;
     }
 
-    if (state->proxy_finished)
+    if (state->proxy_finished) {
+      target_hup_handler(socket, state);
       return;
+    }
   }
 }
 
@@ -297,8 +263,9 @@ void target_hup_handler(int socket, void* arg) {
     free(state->client);
   }
 
+  cache_entry_unsubscribe(state->client->cache, state->client->reader);
   close(state->socket);
-  pstring_free(&state->outbuff);
+  pstring_free(&state->client->client_outbuff);
   free_header_entry_list(state->headers);
   free(state);
 }

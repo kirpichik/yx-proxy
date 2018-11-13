@@ -59,6 +59,8 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   reader->arg = arg;
   reader->next = entry->readers;
   entry->readers = reader->next;
+  
+  callback(entry, arg);
 
   return reader;
 }
@@ -97,7 +99,7 @@ static void readers_foreach(cache_entry_t* entry) {
   }
 }
 
-bool cache_entry_append(cache_entry_t* entry, char* data, size_t len) {
+bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
   if (entry == NULL || data == NULL)
     return false;
 
@@ -107,6 +109,8 @@ bool cache_entry_append(cache_entry_t* entry, char* data, size_t len) {
   }
 
   readers_foreach(entry);
+  entry->offset += len;
+
   return false;
 }
 

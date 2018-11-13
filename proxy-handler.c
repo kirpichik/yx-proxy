@@ -58,9 +58,9 @@ void proxy_accept_client(int socket) {
   http_parser_init(&state->parser, HTTP_REQUEST);
 
   state->socket = socket;
-  state->headers = NULL;
-  state->target = NULL;
+  memset(state, 0, sizeof(client_state_t));
   pstring_init(&state->outbuff);
+  pstring_init(&state->client_outbuff);
   pstring_init(&state->url);
 
   state->parser.data = state;
@@ -112,7 +112,6 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   }
 
   state->target->client = state;
-  pstring_init(&state->target->outbuff);
   state->target->headers = NULL;
   state->target->proxy_finished = false;
 

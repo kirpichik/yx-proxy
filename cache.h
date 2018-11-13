@@ -10,7 +10,7 @@
 struct cache_entry;
 
 typedef struct cache_entry_reader {
-  void (*callback)(struct cache_entry*, void* state);
+  void (*callback)(struct cache_entry*, void*);
   void* arg;
   struct cache_entry_reader* next;
 } cache_entry_reader_t;
@@ -40,7 +40,7 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
 bool cache_entry_unsubscribe(cache_entry_t* entry,
                              cache_entry_reader_t* reader);
 
-bool cache_entry_append(cache_entry_t* entry, char* data, size_t len);
+bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len);
 
 void cache_entry_mark_finished(cache_entry_t* entry);
 
