@@ -7,6 +7,7 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "proxy-handler.h"
 
@@ -15,16 +16,14 @@
 #define POLL_SIZE 50
 
 typedef struct callback {
-  void (*callback)(int, void*);
+  void (*callback)(int, int, void*);
   void* arg;
 } callback_t;
 
 typedef struct sockets_state {
   size_t polls_count;
   struct pollfd polls[POLL_SIZE];
-  callback_t input_callbacks[POLL_SIZE];
-  callback_t output_callbacks[POLL_SIZE];
-  callback_t hup_callbacks[POLL_SIZE];
+  callback_t callbacks[POLL_SIZE];
 } sockets_state_t;
 
 static void remove_socket_at(size_t);
@@ -38,11 +37,11 @@ static void interrupt_signal(int sig) {
   close(state.polls[0].fd);
 
   while (state.polls_count-- > 1) {
-    callback_t* cb = &state.hup_callbacks[1];
+    callback_t* cb = &state.callbacks[1];
     if (cb->callback == NULL)  // For server socket
       close(state.polls[1].fd);
     else
-      cb->callback(state.polls[1].fd, cb->arg);
+      cb->callback(state.polls[1].fd, POLLHUP, cb->arg);
   }
 
   printf("Server closed.\n");
@@ -57,9 +56,7 @@ static void interrupt_signal(int sig) {
 static void init_sockets_state(int server_socket) {
   // Not required if state is global, but still do it for the future.
   memset(state.polls, 0, sizeof(state.polls));
-  memset(state.input_callbacks, 0, sizeof(state.input_callbacks));
-  memset(state.output_callbacks, 0, sizeof(state.output_callbacks));
-  memset(state.hup_callbacks, 0, sizeof(state.hup_callbacks));
+  memset(state.callbacks, 0, sizeof(state.callbacks));
 
   state.polls_count = 1;
   state.polls[0].fd = server_socket;
@@ -79,6 +76,8 @@ int sockets_poll_loop(int server_socket) {
   listen(server_socket, POLL_SIZE);
 
   while ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) != -2) {
+    if (count == -1 && errno == EINTR)
+      continue;
     for (size_t i = 0; i < state.polls_count; i++) {
       if (count == 0)
         break;
@@ -108,43 +107,8 @@ int sockets_poll_loop(int server_socket) {
         continue;
       }
 
-      // Handle other sockets
-      bool ok = false;
-
-      if (revents & POLLPRI || revents & POLLIN) {
-        callback_t* cb = &state.input_callbacks[i];
-        cb->callback(state.polls[i].fd, cb->arg);
-        ok = true;
-      }
-
-      if (revents & POLLOUT) {
-        callback_t* cb = &state.output_callbacks[i];
-        cb->callback(state.polls[i].fd, cb->arg);
-        ok = true;
-      }
-
-      if (ok)
-        continue;
-
-      if (revents & POLLHUP) {
-        fprintf(stderr, "Socket %d hup\n", state.polls[i].fd);
-        callback_t* cb = &state.hup_callbacks[i];
-        cb->callback(state.polls[i].fd, cb->arg);
-        remove_socket_at(i);
-        i--;
-      }
-
-      if (revents & POLLNVAL) {
-        fprintf(stderr, "Socket %d nval\n", state.polls[i].fd);
-        remove_socket_at(i);
-        i--;
-      }
-
-      if (revents & POLLERR) {
-        fprintf(stderr, "Socket %d error\n", state.polls[i].fd);
-        remove_socket_at(i);
-        i--;
-      }
+      callback_t* cb = &state.callbacks[i];
+      cb->callback(state.polls[i].fd, revents, cb->arg);
     }
   }
 
@@ -153,12 +117,14 @@ int sockets_poll_loop(int server_socket) {
   return -1;
 }
 
-bool sockets_add_socket(int socket) {
+bool sockets_add_socket(int socket, void (*callback)(int, int, void*), void* arg) {
   if (state.polls_count >= POLL_SIZE)
     return false;
 
   state.polls[state.polls_count].fd = socket;
   state.polls[state.polls_count].events = 0;
+  state.callbacks[state.polls_count].callback = callback;
+  state.callbacks[state.polls_count].arg = arg;
   state.polls_count++;
 
   return true;
@@ -176,47 +142,6 @@ static ssize_t find_socket(int socket) {
     if (socket == state.polls[i].fd)
       return i;
   return -1;
-}
-
-bool sockets_set_in_handler(int socket,
-                            void (*callback)(int, void*),
-                            void* arg) {
-  ssize_t pos = find_socket(socket);
-  if (pos == -1)
-    return false;
-
-  state.input_callbacks[pos].callback = callback;
-  state.input_callbacks[pos].arg = arg;
-  state.polls[pos].events |= POLLIN | POLLPRI;
-
-  return true;
-}
-
-bool sockets_set_out_handler(int socket,
-                             void (*callback)(int, void*),
-                             void* arg) {
-  ssize_t pos = find_socket(socket);
-  if (pos == -1)
-    return false;
-
-  state.output_callbacks[pos].callback = callback;
-  state.output_callbacks[pos].arg = arg;
-  state.polls[pos].events |= POLLOUT;
-
-  return true;
-}
-
-bool sockets_set_hup_handler(int socket,
-                             void (*callback)(int, void*),
-                             void* arg) {
-  ssize_t pos = find_socket(socket);
-  if (pos == -1)
-    return false;
-
-  state.hup_callbacks[pos].callback = callback;
-  state.hup_callbacks[pos].arg = arg;
-
-  return true;
 }
 
 bool sockets_enable_in_handle(int socket) {
@@ -266,17 +191,9 @@ static void remove_socket_at(size_t pos) {
          sizeof(struct pollfd));
   memset(&state.polls[state.polls_count], 0, sizeof(struct pollfd));
 
-  memcpy(&state.input_callbacks[pos], &state.input_callbacks[state.polls_count],
+  memcpy(&state.callbacks[pos], &state.callbacks[state.polls_count],
          sizeof(callback_t));
-  memset(&state.input_callbacks[state.polls_count], 0, sizeof(callback_t));
-
-  memcpy(&state.output_callbacks[pos],
-         &state.output_callbacks[state.polls_count], sizeof(callback_t));
-  memset(&state.output_callbacks[state.polls_count], 0, sizeof(callback_t));
-
-  memcpy(&state.hup_callbacks[pos], &state.hup_callbacks[state.polls_count],
-         sizeof(callback_t));
-  memset(&state.hup_callbacks[state.polls_count], 0, sizeof(callback_t));
+  memset(&state.callbacks[state.polls_count], 0, sizeof(callback_t));
 }
 
 bool sockets_remove_socket(int socket) {
@@ -285,6 +202,7 @@ bool sockets_remove_socket(int socket) {
     return false;
 
   remove_socket_at(pos);
+  close(socket);
 
   return true;
 }

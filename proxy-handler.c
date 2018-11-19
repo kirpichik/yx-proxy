@@ -16,38 +16,6 @@
 
 #define DEFAULT_HTTP_PORT 80
 
-header_entry_t* create_header_entry(const char* key, size_t key_len) {
-  header_entry_t* entry = (header_entry_t*)malloc(sizeof(header_entry_t));
-  if (entry == NULL) {
-    perror("Cannot create header entry");
-    return NULL;
-  }
-
-  entry->next = NULL;
-  pstring_init(&entry->key);
-  pstring_init(&entry->value);
-  if (!pstring_append(&entry->key, key, key_len)) {
-    perror("Cannot store header key");
-    free(entry);
-    return NULL;
-  }
-
-  return entry;
-}
-
-void free_header_entry_list(header_entry_t* entry) {
-  header_entry_t* temp;
-
-  while (entry) {
-    pstring_free(&entry->key);
-    pstring_free(&entry->value);
-
-    temp = entry->next;
-    free(entry);
-    entry = temp;
-  }
-}
-
 void proxy_accept_client(int socket) {
   client_state_t* state = (client_state_t*)malloc(sizeof(client_state_t));
   if (state == NULL) {
@@ -55,25 +23,27 @@ void proxy_accept_client(int socket) {
     close(socket);
     return;
   }
+  memset(state, 0, sizeof(client_state_t));
+
   http_parser_init(&state->parser, HTTP_REQUEST);
 
   state->socket = socket;
-  memset(state, 0, sizeof(client_state_t));
-  pstring_init(&state->outbuff);
   pstring_init(&state->client_outbuff);
+  pstring_init(&state->target_outbuff);
+  pstring_init(&state->header_key);
+  pstring_init(&state->header_value);
   pstring_init(&state->url);
 
   state->parser.data = state;
 
-  if (!sockets_add_socket(socket)) {
+  if (!sockets_add_socket(socket, &client_handler, state)) {
     fprintf(stderr, "Too many file descriptors.\n");
     free(state);
     close(socket);
     return;
   }
-
-  sockets_set_hup_handler(socket, &client_hup_handler, state);
-  sockets_set_in_handler(socket, &client_input_handler, &state->parser);
+  
+  sockets_enable_in_handle(state->socket);
 }
 
 /**
@@ -99,7 +69,7 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   char* split_pos = strrchr(host, ':');
 
   if (split_pos != NULL) {
-    port = atoi(split_pos + (-strlen(host)));
+    port = atoi(host + (split_pos - host) + 1);
     hostname = (char*)malloc((size_t)(split_pos - host + 1));
     memcpy(hostname, host, (size_t)(split_pos - host));
     hostname[split_pos - host] = '\0';
@@ -111,13 +81,15 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     return false;
   }
 
-  state->target->client = state;
-  state->target->headers = NULL;
-  state->target->proxy_finished = false;
+  pstring_init(&state->target->outbuff);
+  pstring_replace(&state->target->outbuff, state->target_outbuff.str, state->target_outbuff.len);
+  state->target->cache = state->cache;
+  state->target->code = 0;
 
   state->target->socket = socket(AF_INET, SOCK_STREAM, 0);
   if (state->target->socket < 0) {
     perror("Cannot create target socket");
+    pstring_free(&state->target->outbuff);
     free(state->target);
     state->target = NULL;
     return false;
@@ -130,6 +102,7 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   if ((resolved = resolve_hostname(hostname)) == NULL) {
     fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
     close(state->target->socket);
+    pstring_free(&state->target->outbuff);
     free(state->target);
     state->target = NULL;
     if (hostname != host)
@@ -153,6 +126,7 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
       -1) {
     perror("Cannot connect to target");
     close(state->target->socket);
+    pstring_free(&state->target->outbuff);
     free(state->target);
     state->target = NULL;
     return false;
@@ -162,22 +136,17 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   fprintf(stderr, "Connection established with %s\n", hostname);
 #endif
 
-  http_parser_init(&state->target->parser, HTTP_RESPONSE);
-  state->target->parser.data = state->target;
-
-  if (!sockets_add_socket(state->target->socket)) {
+  if (!sockets_add_socket(state->target->socket, &target_handler, state->target)) {
     fprintf(stderr, "Too many file descriptors\n");
     close(state->target->socket);
+    pstring_free(&state->target->outbuff);
     free(state->target);
     state->target = NULL;
     return false;
   }
-
-  sockets_set_hup_handler(state->target->socket, &target_hup_handler,
-                          state->target);
-  sockets_set_in_handler(state->target->socket, &target_input_handler,
-                         &state->target->parser);
-
+  
+  sockets_enable_in_handle(state->target->socket);
+  sockets_enable_out_handle(state->target->socket);
   return true;
 }
 
@@ -203,16 +172,16 @@ bool send_pstring(int socket, pstring_t* buff) {
   return true;
 }
 
-char* build_header_string(header_entry_t* entry, size_t* result_len) {
-  size_t len = entry->key.len + entry->value.len + 4;  // 4 is ": " and "\r\n"
+char* build_header_string(pstring_t* key, pstring_t* value, size_t* result_len) {
+  size_t len = key->len + value->len + 4;  // 4 is ": " and "\r\n"
   char* output = (char*)malloc(len);
   if (output == NULL)
     return NULL;
 
-  memcpy(output, entry->key.str, entry->key.len);
-  output[entry->key.len] = ':';
-  output[entry->key.len + 1] = ' ';
-  memcpy(output + entry->key.len + 2, entry->value.str, entry->value.len);
+  memcpy(output, key->str, key->len);
+  output[key->len] = ':';
+  output[key->len + 1] = ' ';
+  memcpy(output + key->len + 2, value->str, value->len);
   output[len - 2] = '\r';
   output[len - 1] = '\n';
 

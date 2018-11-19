@@ -5,11 +5,6 @@
 /**
  * Callback for input data from proxying target.
  */
-void target_input_handler(int socket, void* arg);
-
-/**
- * Callback for target socket hup.
- */
-void target_hup_handler(int socket, void* arg);
+void target_handler(int socket, int events, void* arg);
 
 #endif

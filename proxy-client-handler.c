@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/poll.h>
 #include <unistd.h>
 
 #include "proxy-handler.h"
@@ -19,21 +20,9 @@
 #define HEADER_HOST "Host"
 #define HEADER_CONNECTION_CLOSE "close"
 #define PROTOCOL_VERSION_STR "HTTP/1.0"
+#define LINE_DELIM "\r\n"
 
 #define DEF_LEN(str) (sizeof(str) - 1)
-
-/**
- * Callback that, when notified of the possibility of writing to the socket,
- * sends new data to the socket.
- */
-static void target_output_handler(int socket, void* arg) {
-  client_state_t* state = (client_state_t*)arg;
-
-  if (send_pstring(socket, &state->outbuff)) {
-    sockets_cancel_out_handle(state->target->socket);
-    sockets_enable_in_handle(state->socket);
-  }
-}
 
 /**
  * Saves the data that required to send to proxying target.
@@ -50,24 +39,19 @@ static bool send_to_target(client_state_t* state,
   // Drop output if cache used
   if (state->use_cache)
     return true;
-  
-  if (!pstring_append(&state->outbuff, buff, len))
-    return false;
-  // TODO - optimisation: try to send, before this
-  sockets_set_out_handler(state->target->socket, &target_output_handler, state);
-  sockets_cancel_in_handle(state->socket);
-  return true;
-}
 
-/**
- * Callback that, when notified of the possibility of writing to the socket,
- * sends new data to the socket.
- */
-static void client_output_handler(int socket, void* arg) {
-  client_state_t* state = (client_state_t*)arg;
+  // Only store if no connection
+  if (state->target == NULL)
+    return pstring_append(&state->target_outbuff, buff, len);
   
-  if (send_pstring(socket, &state->client_outbuff))
-    sockets_cancel_out_handle(state->socket);
+  if (!pstring_append(&state->target->outbuff, buff, len))
+    return false;
+
+  // TODO - optimisation: try to send, before this
+  sockets_enable_out_handle(state->target->socket);
+  sockets_cancel_in_handle(state->socket);
+
+  return true;
 }
 
 /**
@@ -94,11 +78,11 @@ static char* get_method_by_id(int id) {
  * Dumps initial request line from client to proxying target.
  *
  * @param state Current state.
- * @param method String name of request method.
  *
  * @return {@code true} if initial line successfully sent.
  */
-static bool dump_initial_line(client_state_t* state, char* method) {
+static bool dump_initial_line(client_state_t* state) {
+  char* method = get_method_by_id(state->parser.method);
   if (method == NULL)
     return false;
 
@@ -107,7 +91,7 @@ static bool dump_initial_line(client_state_t* state, char* method) {
   size_t url_len = strlen(state->url.str);
   size_t len = prefix_len + url_len + suffix_len;
 
-  // TODO - allocate at stack
+  // TODO - allocate on stack
   char* output = (char*)malloc(len + 1);
   if (output == NULL)
     return false;
@@ -132,48 +116,20 @@ static bool dump_initial_line(client_state_t* state, char* method) {
   return result;
 }
 
-/**
- * Dumps all buffered headers to target.
- *
- * @param state Current handler state.
- *
- * @return {@code true} if all headers successfully dumped.
- */
-static bool dump_buffered_headers(client_state_t* state) {
-  header_entry_t* entry = state->headers;
-  char* output;
-  size_t len;
-
-  while (entry) {
-    output = build_header_string(entry, &len);
-    if (output == NULL)
-      return false;
-
-    if (!send_to_target(state, output, len)) {
-      free(output);
-      return false;
-    }
-
-    free(output);
-    state->headers = entry->next;
-    pstring_free(&entry->key);
-    pstring_free(&entry->value);
-    free(entry);
-    entry = state->headers;
-  }
-
-  return true;
-}
-
-static void accept_cache_updates(cache_entry_t* entry, void* arg) {
+static void accept_cache_updates(cache_entry_t* entry, size_t offset, void* arg) {
   client_state_t* state = (client_state_t*) arg;
   if (entry->data.str == NULL)
     return;
-  
-  if (!pstring_append(&state->client_outbuff, entry->data.str + entry->offset, entry->data.len - entry->offset))
-    return;
+
+  if (entry->data.len - offset != 0) {
+    if (!pstring_append(&state->client_outbuff,
+                        entry->data.str + offset,
+                        entry->data.len - offset))
+      return;
+  }
+
   // TODO - optimisation: try to send, before this
-  sockets_set_out_handler(state->socket, &client_output_handler, state);
+  sockets_enable_out_handle(state->socket);
   return;
 }
 
@@ -202,44 +158,59 @@ static int handle_request_url(http_parser* parser, const char* at, size_t len) {
 
   if (!pstring_append(&state->url, at, len)) {
     perror("Cannot store client url");
+    state->parse_error = true;
     return 1;
   }
 
   return 0;
 }
 
+static bool dump_buffered_header(client_state_t* state) {
+  size_t len;
+  char* line = build_header_string(&state->header_key, &state->header_value, &len);
+  
+  if (line == NULL) {
+    perror("Cannot allocate client output header line");
+    return false;
+  }
+  
+  if (!send_to_target(state, line, len)) {
+    fprintf(stderr, "Cannot send header to target\n");
+    free(line);
+    return false;
+  }
+
+  pstring_free(&state->header_key);
+  pstring_free(&state->header_value);
+  free(line);
+  return true;
+}
+
 /**
  * Finalize request header.
  */
-static bool handle_finished_header(http_parser* parser) {
-  client_state_t* state = (client_state_t*)parser->data;
-  header_entry_t* header = state->headers;
-  if (header == NULL)
+static bool handle_finished_header(client_state_t* state) {
+  if (state->header_key.str == NULL)
     return true;
 
-  if (!strncmp(header->key.str, HEADER_CONNECTION,
+  // Connection: close
+  if (!strncmp(state->header_key.str, HEADER_CONNECTION,
                DEF_LEN(HEADER_CONNECTION))) {
-    pstring_replace(&header->value, HEADER_CONNECTION_CLOSE,
+    pstring_replace(&state->header_value, HEADER_CONNECTION_CLOSE,
                     DEF_LEN(HEADER_CONNECTION_CLOSE));
-    pstring_finalize(&header->value);
-    return true;
+    pstring_finalize(&state->header_value);
+    return dump_buffered_header(state);
   }
 
-  pstring_finalize(&header->value);
+  pstring_finalize(&state->header_value);
 
-  // Already connected or cache active
-  if (state->use_cache || state->target != NULL)
-    return dump_buffered_headers(state);
-
-  if (!strncmp(header->key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
-    if (!establish_cached_connection(state, header->value.str))
-      return false;
-    if (!dump_initial_line(state, get_method_by_id(parser->method)))
-      return false;
-    return dump_buffered_headers(state);
+  // Host: <host>
+  if (!strncmp(state->header_key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
+    return establish_cached_connection(state, state->header_value.str) &&
+            dump_buffered_header(state);
   }
 
-  return true;
+  return dump_buffered_header(state);
 }
 
 /**
@@ -250,25 +221,24 @@ static int handle_request_header_field(http_parser* parser,
                                        size_t len) {
   client_state_t* state = (client_state_t*)parser->data;
 
-  pstring_finalize(&state->url);
+  if (!state->url_dumped) {
+    pstring_finalize(&state->url);
+    dump_initial_line(state);
+    state->url_dumped = true;
+  }
 
-  if (state->headers) {               // Previous header exists
-    if (state->headers->value.str) {  // Value stored, creating new
-      if (!handle_finished_header(parser))
-        return 1;
-      header_entry_t* entry = create_header_entry(at, len);
-      if (entry == NULL)
-        return 1;
-      entry->next = state->headers;
-      state->headers = entry;
-    } else {  // Key append
-      if (!pstring_append(&state->headers->key, at, len)) {
-        perror("Cannot append header key");
-        return 1;
-      }
-    }
-  } else
-    state->headers = create_header_entry(at, len);
+  // Handle previous header
+  if (!handle_finished_header(state)) {
+    state->parse_error = true;
+    return 1;
+  }
+
+  // Append to current header key
+  if (!pstring_append(&state->header_key, at, len)) {
+    perror("Cannot append header key");
+    state->parse_error = true;
+    return 1;
+  }
 
   return 0;
 }
@@ -281,10 +251,11 @@ static int handle_request_header_value(http_parser* parser,
                                        size_t len) {
   client_state_t* state = (client_state_t*)parser->data;
 
-  pstring_finalize(&state->headers->key);
+  pstring_finalize(&state->header_key);
 
-  if (!pstring_append(&state->headers->value, at, len)) {
+  if (!pstring_append(&state->header_value, at, len)) {
     perror("Cannot store client header value");
+    state->parse_error = true;
     return 1;
   }
 
@@ -298,9 +269,11 @@ static int handle_request_headers_complete(http_parser* parser) {
   client_state_t* state = (client_state_t*)parser->data;
 
   pstring_finalize(&state->url);
-  if (!handle_finished_header(parser))
+  if (!handle_finished_header(state)) {
+    state->parse_error = true;
     return 1;
-  send_to_target(state, "\r\n", 2);
+  }
+  send_to_target(state, LINE_DELIM, DEF_LEN(LINE_DELIM));
 
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Request headers complete.\n");
@@ -319,6 +292,7 @@ static int handle_request_body(http_parser* parser,
 
   if (!send_to_target(state, at, len)) {
     fprintf(stderr, "Cannot proxy client data body to target socket\n");
+    state->parse_error = true;
     return 1;
   }
 
@@ -338,60 +312,65 @@ static http_parser_settings http_request_callbacks = {
     NULL  /* on_chunk_complete */
 };
 
-void client_input_handler(int socket, void* arg) {
-  http_parser* parser = (http_parser*)arg;
-
+static bool client_input_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
 
   while (1) {
-    result = recv(socket, buff, BUFFER_SIZE, 0);
+    result = recv(state->socket, buff, BUFFER_SIZE, 0);
 
     if (result == -1) {
       if (errno != EAGAIN) {
         perror("Cannot recv data from client");
-        free(parser);
-        sockets_remove_socket(socket);
-        close(socket);
+        return false;
       }
-      return;
-    } else if (result == 0) {
-      if (errno != EAGAIN)
-        client_hup_handler(socket, (client_state_t*)parser->data);
-      return;
-    }
+      return true;
+    } else if (result == 0)
+      return true;
 
-    nparsed =
-        http_parser_execute(parser, &http_request_callbacks, buff, result);
-    if (nparsed != result) {
+    nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff, result);
+    if (nparsed != result || state->parse_error) {
       fprintf(stderr, "Cannot parse http input from client socket\n");
-      client_hup_handler(socket, (client_state_t*)parser->data);
-      return;
+      return false;
     }
   }
 }
 
-void client_hup_handler(int socket, void* arg) {
-  client_state_t* state = (client_state_t*)arg;
-  sockets_remove_socket(socket);
-
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Client socket hup.\n");
-#endif
-
-  if (state->target != NULL) {
-    close(state->target->socket);
-    sockets_remove_socket(state->target->socket);
-    pstring_free(&state->client_outbuff);
-    free_header_entry_list(state->target->headers);
-    free(state->target);
-  }
-
+static void client_cleanup(client_state_t* state) {
+  sockets_remove_socket(state->socket);
   cache_entry_unsubscribe(state->cache, state->reader);
-  close(state->socket);
-  pstring_free(&state->outbuff);
+  pstring_free(&state->client_outbuff);
+  pstring_free(&state->target_outbuff);
   pstring_free(&state->url);
-  free_header_entry_list(state->headers);
+  pstring_free(&state->header_key);
+  pstring_free(&state->header_value);
   free(state);
+}
+
+void client_handler(int socket, int events, void* arg) {
+  client_state_t* state = (client_state_t*) arg;
+  
+  // Handle output
+  if (events & POLLOUT) {
+    if (send_pstring(socket, &state->client_outbuff)) {
+      if (state->cache->finished)
+        client_cleanup(state);
+      else
+        sockets_cancel_out_handle(state->socket);
+    }
+  }
+  
+  // Handle input
+  if (events & (POLLIN | POLLPRI)) {
+    if (!client_input_handler(state)) {
+      client_cleanup(state);
+      return;
+    }
+  }
+  
+  // Handle hup
+  if (events & POLLHUP) {
+    client_cleanup(state);
+  }
 }

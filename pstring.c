@@ -62,6 +62,8 @@ void pstring_finalize(pstring_t* str) {
 }
 
 void pstring_free(pstring_t* str) {
-  if (str != NULL && str->str != NULL)
+  if (str != NULL && str->str != NULL) {
     free(str->str);
+    pstring_init(str);
+  }
 }

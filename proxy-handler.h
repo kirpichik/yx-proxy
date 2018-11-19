@@ -8,51 +8,32 @@
 #ifndef _PROXY_HANDLER_H
 #define _PROXY_HANDLER_H
 
-typedef struct header_entry {
-  pstring_t key;
-  pstring_t value;
-  struct header_entry* next;
-} header_entry_t;
+#define PROXY_HTTP_RESPONSE_VALID_LINE_LEN sizeof("HTTP/1.0 200") - 1
 
 struct target_state;
 
 typedef struct client_state {
   int socket;
   http_parser parser;
-  pstring_t outbuff;
+  bool parse_error;
+  pstring_t url;
+  bool url_dumped;
   pstring_t client_outbuff;
-  header_entry_t* headers;
+  pstring_t target_outbuff;
+  pstring_t header_key;
+  pstring_t header_value;
   struct target_state* target;
   cache_entry_reader_t* reader;
   cache_entry_t* cache;
   bool use_cache;
-  pstring_t url;
 } client_state_t;
 
 typedef struct target_state {
   int socket;
-  http_parser parser;
-  header_entry_t* headers;
-  struct client_state* client;
-  bool proxy_finished;
+  pstring_t outbuff;
+  cache_entry_t* cache;
+  int code;
 } target_state_t;
-
-/**
- * Allocates new header entry.
- *
- * @param key Source buffer for key.
- * @param key_len Count of bytes required to copy.
- *
- * @return New header entry of {@code NULL} if not enougth memory.
- */
-header_entry_t* create_header_entry(const char* key, size_t key_len);
-
-/**
- * Free all memory allocated to headers list.
- *
- * @param entry List head.
- */
-void free_header_entry_list(header_entry_t* entry);
 
 /**
  * Accepts new client at required socket.
@@ -86,12 +67,13 @@ bool send_pstring(int socket, pstring_t* buff);
 /**
  * Allocates and build header string from header entry.
  *
- * @param entry Header entry.
+ * @param key Header key.
+ * @param value Header value.
  * @param result_len Result string length.
  *
  * @return New header string allocated on heap or {@code NULL} if not enougth
  * memory.
  */
-char* build_header_string(header_entry_t* entry, size_t* result_len);
+char* build_header_string(pstring_t* key, pstring_t* value, size_t* result_len);
 
 #endif

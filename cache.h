@@ -10,15 +10,16 @@
 struct cache_entry;
 
 typedef struct cache_entry_reader {
-  void (*callback)(struct cache_entry*, void*);
+  void (*callback)(struct cache_entry*, size_t, void*);
   void* arg;
+  size_t offset;
   struct cache_entry_reader* next;
 } cache_entry_reader_t;
 
 typedef struct cache_entry {
   char* url;
   bool finished;
-  size_t offset;
+  bool invalid;
   pstring_t data;
   cache_entry_reader_t* readers;
   struct cache_entry* next;
@@ -34,6 +35,7 @@ int cache_find_or_create(char* url, cache_entry_t** entry);
 
 cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
                                             void (*callback)(cache_entry_t*,
+                                                             size_t,
                                                              void*),
                                             void* arg);
 
@@ -43,6 +45,10 @@ bool cache_entry_unsubscribe(cache_entry_t* entry,
 bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len);
 
 void cache_entry_mark_finished(cache_entry_t* entry);
+
+void cache_entry_mark_invalid(cache_entry_t* entry);
+
+void cache_entry_mark_invalid_and_finished(cache_entry_t* entry);
 
 void cache_entry_drop(cache_entry_t* entry);
 

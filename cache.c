@@ -19,6 +19,20 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
   cache_entry_t* entry = cache.list;
 
   while (entry) {
+    // Found invalid cache entry
+    if (entry->invalid) {
+      // If no readers, delete it
+      if (entry->readers == NULL) {
+        free(entry->url);
+        pstring_free(&entry->data);
+        cache_entry_t* temp = entry->next;
+        free(entry);
+        entry = temp;
+      } else
+        entry = entry->next;
+      continue;
+    }
+    
     if (!strcmp(url, entry->url)) {
       (*result) = entry;
       return 0;
@@ -38,12 +52,14 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
   entry->url = strdup(url);
   entry->next = cache.list;
   cache.list = entry;
+  (*result) = entry;
 
   return 1;
 }
 
 cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
                                             void (*callback)(cache_entry_t*,
+                                                             size_t,
                                                              void*),
                                             void* arg) {
   if (entry == NULL || callback == NULL)
@@ -57,10 +73,11 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   }
   reader->callback = callback;
   reader->arg = arg;
+  reader->offset = 0;
   reader->next = entry->readers;
-  entry->readers = reader->next;
+  entry->readers = reader;
   
-  callback(entry, arg);
+  callback(entry, 0, arg);
 
   return reader;
 }
@@ -91,10 +108,11 @@ bool cache_entry_unsubscribe(cache_entry_t* entry,
   return false;
 }
 
-static void readers_foreach(cache_entry_t* entry) {
+static void readers_foreach(cache_entry_t* entry, size_t len) {
   cache_entry_reader_t* reader = entry->readers;
   while (reader) {
-    reader->callback(entry, reader->arg);
+    reader->callback(entry, reader->offset, reader->arg);
+    reader->offset += len;
     reader = reader->next;
   }
 }
@@ -108,16 +126,28 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
     return false;
   }
 
-  readers_foreach(entry);
-  entry->offset += len;
+  readers_foreach(entry, len);
 
-  return false;
+  return true;
 }
 
 void cache_entry_mark_finished(cache_entry_t* entry) {
   if (entry != NULL) {
     entry->finished = true;
-    readers_foreach(entry);
+    readers_foreach(entry, 0);
+  }
+}
+
+void cache_entry_mark_invalid(cache_entry_t* entry) {
+  if (entry != NULL)
+    entry->invalid = true;
+}
+
+void cache_entry_mark_invalid_and_finished(cache_entry_t* entry) {
+  if (entry != NULL) {
+    entry->finished = true;
+    entry->invalid = true;
+    readers_foreach(entry, 0);
   }
 }
 

@@ -5,11 +5,6 @@
 /**
  * Callback for input data from client.
  */
-void client_input_handler(int socket, void* arg);
-
-/**
- * Callback for client socket hup.
- */
-void client_hup_handler(int socket, void* arg);
+void client_handler(int socket, int events, void* arg);
 
 #endif
