@@ -3,7 +3,7 @@ CC=gcc
 OS=$(shell uname)
 # Compiler flags
 INCLUDES=
-CFLAGS=-c -Wall -std=gnu99 $(INCLUDES) -D_REENTRANT
+CFLAGS=-c -Wall -std=gnu99 $(INCLUDES) -D_REENTRANT -D_PROXY_DEBUG
 LDFLAGS=-lm -lpthread
 ifeq ($(OS),SunOS)
 LDFLAGS+=-lsocket -lnsl
