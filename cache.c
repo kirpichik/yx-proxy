@@ -20,14 +20,14 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
 
   while (entry) {
     // Found invalid cache entry
-    if (entry->invalid) {
+    if (entry->next && entry->invalid) {
       // If no readers, delete it
-      if (entry->readers == NULL) {
-        free(entry->url);
-        pstring_free(&entry->data);
-        cache_entry_t* temp = entry->next;
-        free(entry);
-        entry = temp;
+      if (entry->next->readers == NULL) {
+        free(entry->next->url);
+        pstring_free(&entry->next->data);
+        cache_entry_t* temp = entry->next->next;
+        free(entry->next);
+        entry->next = temp;
       } else
         entry = entry->next;
       continue;
@@ -50,6 +50,10 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
   memset(entry, 0, sizeof(cache_entry_t));
   pstring_init(&entry->data);
   entry->url = strdup(url);
+  if (entry->url == NULL) {
+    free(entry);
+    return false;
+  }
   entry->next = cache.list;
   cache.list = entry;
   (*result) = entry;
