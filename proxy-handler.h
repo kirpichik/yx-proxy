@@ -30,9 +30,10 @@ typedef struct client_state {
 
 typedef struct target_state {
   int socket;
+  http_parser parser;
   pstring_t outbuff;
   cache_entry_t* cache;
-  int code;
+  bool message_complete;
 } target_state_t;
 
 /**

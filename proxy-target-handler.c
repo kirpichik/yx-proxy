@@ -13,23 +13,30 @@
 #include "proxy-target-handler.h"
 
 #define BUFFER_SIZE 1024
-#define HTTP_VERSION_PREFIX_LEN (sizeof("HTTP/1.0 ") - 1)
 
-static bool parse_response_code(target_state_t* state, char* buff, size_t len) {
-  // If code already parsed
-  if (state->code >= 100)
-    return true;
-  
-  state->code = 200;
-  
-  // TODO - parse code and mark cache invalid if not 200
-  
-  return true;
+static int handle_response_message_complete(http_parser* parser) {
+  target_state_t* state = (target_state_t*)parser->data;
+  state->message_complete = true;
+  return 0;
 }
+
+static http_parser_settings http_response_callbacks = {
+  NULL, /* on_message_begin */
+  NULL, /* on_url */
+  NULL, /* on_response_status */
+  NULL, /* on_header_field */
+  NULL, /* on_header_value */
+  NULL, /* on_headers_complete */
+  NULL, /* on_response_body */
+  handle_response_message_complete,
+  NULL, /* on_chunk_header */
+  NULL  /* on_chunk_complete */
+};
 
 static bool target_input_handler(target_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
+  size_t nparsed;
 
   while (1) {
     result = recv(state->socket, buff, BUFFER_SIZE, 0);
@@ -43,8 +50,9 @@ static bool target_input_handler(target_state_t* state) {
     } else if (result == 0)
       return true;
 
-    if (!parse_response_code(state, buff, result)) {
-      fprintf(stderr, "Cannot parse response code\n");
+    nparsed = http_parser_execute(&state->parser, &http_response_callbacks, buff, result);
+    if (nparsed != result) {
+      fprintf(stderr, "Cannot parse http input from target socket\n");
       return false;
     }
     
@@ -81,12 +89,13 @@ void target_handler(int socket, int events, void* arg) {
   }
 
   // Handle hup
-  if (events & POLLHUP) {
+  if (events & POLLHUP || state->message_complete) {
     // If not OK code, mark entry as invalid
-    if (state->code != 200)
+    if (state->parser.status_code != 200)
       cache_entry_mark_invalid_and_finished(state->cache);
     else
       cache_entry_mark_finished(state->cache);
     target_cleanup(state);
+    return;
   }
 }

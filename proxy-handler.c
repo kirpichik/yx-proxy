@@ -84,7 +84,9 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   pstring_init(&state->target->outbuff);
   pstring_replace(&state->target->outbuff, state->target_outbuff.str, state->target_outbuff.len);
   state->target->cache = state->cache;
-  state->target->code = 0;
+  state->target->message_complete = false;
+  http_parser_init(&state->target->parser, HTTP_RESPONSE);
+  state->target->parser.data = state->target;
 
   state->target->socket = socket(AF_INET, SOCK_STREAM, 0);
   if (state->target->socket < 0) {
