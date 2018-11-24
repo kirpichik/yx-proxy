@@ -76,6 +76,21 @@ static char* get_method_by_id(int id) {
   }
 }
 
+static char* extract_path_from_url(char* url, size_t len) {
+  size_t slash_count = 0;
+  char* res = url;
+
+  for (size_t i = 0; i < len; i++) {
+    if (*(++res) == '/')
+      slash_count++;
+
+    if (slash_count == 3)
+      return res;
+  }
+  
+  return NULL;
+}
+
 /**
  * Dumps initial request line from client to proxying target.
  *
@@ -87,10 +102,14 @@ static bool dump_initial_line(client_state_t* state) {
   char* method = get_method_by_id(state->parser.method);
   if (method == NULL)
     return false;
+  
+  char* path = extract_path_from_url(state->url.str, state->url.len);
+  if (path == NULL)
+    return false;
 
   size_t prefix_len = strlen(method) + 1;                 // "<method> "
   size_t suffix_len = DEF_LEN(PROTOCOL_VERSION_STR) + 3;  // " <version>\r\n"
-  size_t url_len = strlen(state->url.str);
+  size_t url_len = state->url.len - (path - state->url.str);
   size_t len = prefix_len + url_len + suffix_len;
 
   // TODO - allocate on stack
@@ -100,7 +119,7 @@ static bool dump_initial_line(client_state_t* state) {
 
   memcpy(output, method, prefix_len - 1);
   output[prefix_len - 1] = ' ';
-  memcpy(output + prefix_len, state->url.str, url_len);
+  memcpy(output + prefix_len, path, url_len);
   output[prefix_len + url_len] = ' ';
   memcpy(output + prefix_len + url_len + 1, PROTOCOL_VERSION_STR,
          suffix_len - 1);

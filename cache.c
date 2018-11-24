@@ -114,10 +114,14 @@ bool cache_entry_unsubscribe(cache_entry_t* entry,
 
 static void readers_foreach(cache_entry_t* entry, size_t len) {
   cache_entry_reader_t* reader = entry->readers;
+  cache_entry_reader_t* curr;
   while (reader) {
-    reader->callback(entry, reader->offset, reader->arg);
-    reader->offset += len;
+    // This order is due to the fact that in
+    // the callback you can delete the reader
+    curr = reader;
     reader = reader->next;
+    curr->offset += len;
+    curr->callback(entry, curr->offset - len, curr->arg);
   }
 }
 
