@@ -3,13 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
+#include "cache.h"
 #include "proxy-handler.h"
 #include "sockets-handler.h"
-#include "cache.h"
 
 #include "proxy-client-handler.h"
 
@@ -45,7 +45,7 @@ static bool send_to_target(client_state_t* state,
   // Only store if no connection
   if (state->target == NULL)
     return pstring_append(&state->target_outbuff, buff, len);
-  
+
   if (!pstring_append(&state->target->outbuff, buff, len))
     return false;
 
@@ -118,14 +118,15 @@ static bool dump_initial_line(client_state_t* state) {
   return result;
 }
 
-static void accept_cache_updates(cache_entry_t* entry, size_t offset, void* arg) {
-  client_state_t* state = (client_state_t*) arg;
+static void accept_cache_updates(cache_entry_t* entry,
+                                 size_t offset,
+                                 void* arg) {
+  client_state_t* state = (client_state_t*)arg;
   if (entry->data.str == NULL)
     return;
 
   if (entry->data.len - offset != 0) {
-    if (!pstring_append(&state->client_outbuff,
-                        entry->data.str + offset,
+    if (!pstring_append(&state->client_outbuff, entry->data.str + offset,
                         entry->data.len - offset))
       return;
   } else if (entry->finished) {
@@ -143,15 +144,16 @@ static bool establish_cached_connection(client_state_t* state, char* host) {
   int result = cache_find_or_create(state->url.str, &state->cache);
   if (result == -1)
     return false;
-  
-  state->reader = cache_entry_subscribe(state->cache, &accept_cache_updates, state);
+
+  state->reader =
+      cache_entry_subscribe(state->cache, &accept_cache_updates, state);
   state->use_cache = true;
 
   if (result == 1) {
     state->use_cache = false;
     return proxy_establish_connection(state, host);
   }
-  
+
   return true;
 }
 
@@ -172,13 +174,14 @@ static int handle_request_url(http_parser* parser, const char* at, size_t len) {
 
 static bool dump_buffered_header(client_state_t* state) {
   size_t len;
-  char* line = build_header_string(&state->header_key, &state->header_value, &len);
-  
+  char* line =
+      build_header_string(&state->header_key, &state->header_value, &len);
+
   if (line == NULL) {
     perror("Cannot allocate client output header line");
     return false;
   }
-  
+
   if (!send_to_target(state, line, len)) {
     fprintf(stderr, "Cannot send header to target\n");
     free(line);
@@ -212,7 +215,7 @@ static bool handle_finished_header(client_state_t* state) {
   // Host: <host>
   if (!strncmp(state->header_key.str, HEADER_HOST, DEF_LEN(HEADER_HOST))) {
     return establish_cached_connection(state, state->header_value.str) &&
-            dump_buffered_header(state);
+           dump_buffered_header(state);
   }
 
   return dump_buffered_header(state);
@@ -317,7 +320,7 @@ static http_parser_settings http_request_callbacks = {
     NULL  /* on_chunk_complete */
 };
 
-static bool client_input_handler(client_state_t* state) {
+static int client_input_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
@@ -328,16 +331,17 @@ static bool client_input_handler(client_state_t* state) {
     if (result == -1) {
       if (errno != EAGAIN) {
         perror("Cannot recv data from client");
-        return false;
+        return -1;
       }
-      return true;
+      return 0;
     } else if (result == 0)
-      return true;
+      return 1;
 
-    nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff, result);
+    nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff,
+                                  result);
     if (nparsed != result || state->parse_error) {
       fprintf(stderr, "Cannot parse http input from client socket\n");
-      return false;
+      return -1;
     }
   }
 }
@@ -354,8 +358,9 @@ static void client_cleanup(client_state_t* state) {
 }
 
 void client_handler(int socket, int events, void* arg) {
-  client_state_t* state = (client_state_t*) arg;
-  
+  client_state_t* state = (client_state_t*)arg;
+  int result;
+
   // Handle output
   if (events & POLLOUT) {
     if (send_pstring(socket, &state->client_outbuff)) {
@@ -365,15 +370,17 @@ void client_handler(int socket, int events, void* arg) {
         sockets_cancel_out_handle(state->socket);
     }
   }
-  
+
   // Handle input
   if (events & (POLLIN | POLLPRI)) {
-    if (!client_input_handler(state)) {
+    result = client_input_handler(state);
+    if (result == -1) {
       client_cleanup(state);
       return;
-    }
+    } else if (result == 1)
+      events |= POLLHUP;
   }
-  
+
   // Handle hup
   if (events & POLLHUP) {
     client_cleanup(state);

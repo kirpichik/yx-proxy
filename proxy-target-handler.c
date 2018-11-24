@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "proxy-handler.h"
@@ -21,19 +21,19 @@ static int handle_response_message_complete(http_parser* parser) {
 }
 
 static http_parser_settings http_response_callbacks = {
-  NULL, /* on_message_begin */
-  NULL, /* on_url */
-  NULL, /* on_response_status */
-  NULL, /* on_header_field */
-  NULL, /* on_header_value */
-  NULL, /* on_headers_complete */
-  NULL, /* on_response_body */
-  handle_response_message_complete,
-  NULL, /* on_chunk_header */
-  NULL  /* on_chunk_complete */
+    NULL, /* on_message_begin */
+    NULL, /* on_url */
+    NULL, /* on_response_status */
+    NULL, /* on_header_field */
+    NULL, /* on_header_value */
+    NULL, /* on_headers_complete */
+    NULL, /* on_response_body */
+    handle_response_message_complete,
+    NULL, /* on_chunk_header */
+    NULL  /* on_chunk_complete */
 };
 
-static bool target_input_handler(target_state_t* state) {
+static int target_input_handler(target_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
@@ -44,21 +44,22 @@ static bool target_input_handler(target_state_t* state) {
     if (result == -1) {
       if (errno != EAGAIN) {
         perror("Cannot recv data from target");
-        return false;
+        return -1;
       }
-      return true;
+      return 0;
     } else if (result == 0)
-      return true;
+      return 1;
 
-    nparsed = http_parser_execute(&state->parser, &http_response_callbacks, buff, result);
+    nparsed = http_parser_execute(&state->parser, &http_response_callbacks,
+                                  buff, result);
     if (nparsed != result) {
       fprintf(stderr, "Cannot parse http input from target socket\n");
-      return false;
+      return -1;
     }
-    
+
     if (!cache_entry_append(state->cache, buff, result)) {
       fprintf(stderr, "Cannot store target data to cache\n");
-      return false;
+      return -1;
     }
   }
 }
@@ -71,6 +72,7 @@ static void target_cleanup(target_state_t* state) {
 
 void target_handler(int socket, int events, void* arg) {
   target_state_t* state = (target_state_t*)arg;
+  int result;
 
   // Handle output
   if (events & POLLOUT) {
@@ -80,12 +82,14 @@ void target_handler(int socket, int events, void* arg) {
 
   // Handle input
   if (events & (POLLIN | POLLPRI)) {
-    if (!target_input_handler(state)) {
+    result = target_input_handler(state);
+    if (result == -1) {
       // If parse/receive error, mark invalid and finish
       cache_entry_mark_invalid_and_finished(state->cache);
       target_cleanup(state);
       return;
-    }
+    } else if (result == 1)
+      events |= POLLHUP;
   }
 
   // Handle hup

@@ -1,4 +1,5 @@
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -7,7 +8,6 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "proxy-handler.h"
 
@@ -117,7 +117,9 @@ int sockets_poll_loop(int server_socket) {
   return -1;
 }
 
-bool sockets_add_socket(int socket, void (*callback)(int, int, void*), void* arg) {
+bool sockets_add_socket(int socket,
+                        void (*callback)(int, int, void*),
+                        void* arg) {
   if (state.polls_count >= POLL_SIZE)
     return false;
 

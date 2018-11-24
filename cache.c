@@ -32,7 +32,7 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
         entry = entry->next;
       continue;
     }
-    
+
     if (!strcmp(url, entry->url)) {
       (*result) = entry;
       return 0;
@@ -80,7 +80,7 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   reader->offset = 0;
   reader->next = entry->readers;
   entry->readers = reader;
-  
+
   callback(entry, 0, arg);
 
   return reader;

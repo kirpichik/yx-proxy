@@ -42,7 +42,7 @@ void proxy_accept_client(int socket) {
     close(socket);
     return;
   }
-  
+
   sockets_enable_in_handle(state->socket);
 }
 
@@ -82,7 +82,8 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   }
 
   pstring_init(&state->target->outbuff);
-  pstring_replace(&state->target->outbuff, state->target_outbuff.str, state->target_outbuff.len);
+  pstring_replace(&state->target->outbuff, state->target_outbuff.str,
+                  state->target_outbuff.len);
   state->target->cache = state->cache;
   state->target->message_complete = false;
   http_parser_init(&state->target->parser, HTTP_RESPONSE);
@@ -138,7 +139,8 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   fprintf(stderr, "Connection established with %s\n", hostname);
 #endif
 
-  if (!sockets_add_socket(state->target->socket, &target_handler, state->target)) {
+  if (!sockets_add_socket(state->target->socket, &target_handler,
+                          state->target)) {
     fprintf(stderr, "Too many file descriptors\n");
     close(state->target->socket);
     pstring_free(&state->target->outbuff);
@@ -146,7 +148,7 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     state->target = NULL;
     return false;
   }
-  
+
   sockets_enable_in_handle(state->target->socket);
   sockets_enable_out_handle(state->target->socket);
   return true;
@@ -174,7 +176,9 @@ bool send_pstring(int socket, pstring_t* buff) {
   return true;
 }
 
-char* build_header_string(pstring_t* key, pstring_t* value, size_t* result_len) {
+char* build_header_string(pstring_t* key,
+                          pstring_t* value,
+                          size_t* result_len) {
   size_t len = key->len + value->len + 4;  // 4 is ": " and "\r\n"
   char* output = (char*)malloc(len);
   if (output == NULL)

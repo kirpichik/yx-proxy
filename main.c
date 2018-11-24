@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
   }
 
   fprintf(stderr, "Server socket bound.\n");
-  
+
   cache_init();
 
   return sockets_poll_loop(server_socket);

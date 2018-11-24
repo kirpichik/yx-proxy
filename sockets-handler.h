@@ -20,7 +20,9 @@ int sockets_poll_loop(int server_socket);
  *
  * @return {@code false} if to many sockets already registered.
  */
-bool sockets_add_socket(int socket, void (*callback)(int, int, void*), void* arg);
+bool sockets_add_socket(int socket,
+                        void (*callback)(int, int, void*),
+                        void* arg);
 
 /**
  * Enable input handling for added socket.
