@@ -88,8 +88,10 @@ void target_handler(int socket, int events, void* arg) {
       cache_entry_mark_invalid_and_finished(state->cache);
       target_cleanup(state);
       return;
-    } else if (result == 1)
+    } else if (result == 1) {
       state->message_complete = true;
+      return;
+    }
   }
 
   // Handle hup
