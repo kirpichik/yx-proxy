@@ -148,9 +148,6 @@ static void accept_cache_updates(cache_entry_t* entry,
     if (!pstring_append(&state->client_outbuff, entry->data.str + offset,
                         entry->data.len - offset))
       return;
-  } else if (entry->finished) {
-    client_cleanup(state);
-    return;
   }
 
   // TODO - optimisation: try to send, before this

@@ -116,7 +116,7 @@ static void readers_foreach(cache_entry_t* entry, size_t len) {
   cache_entry_reader_t* reader = entry->readers;
   cache_entry_reader_t* curr;
   while (reader) {
-    // This order is due to the fact that in
+    // This order is because that in
     // the callback you can delete the reader
     curr = reader;
     reader = reader->next;
