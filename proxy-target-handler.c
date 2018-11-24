@@ -38,30 +38,30 @@ static int target_input_handler(target_state_t* state) {
   ssize_t result;
   size_t nparsed;
 
-  while (1) {
-    result = recv(state->socket, buff, BUFFER_SIZE, 0);
+  result = recv(state->socket, buff, BUFFER_SIZE, 0);
 
-    if (result == -1) {
-      if (errno != EAGAIN) {
-        perror("Cannot recv data from target");
-        return -1;
-      }
-      return 0;
-    } else if (result == 0)
-      return 1;
-
-    nparsed = http_parser_execute(&state->parser, &http_response_callbacks,
-                                  buff, result);
-    if (nparsed != result) {
-      fprintf(stderr, "Cannot parse http input from target socket\n");
+  if (result == -1) {
+    if (errno != EAGAIN) {
+      perror("Cannot recv data from target");
       return -1;
     }
+    return 0;
+  } else if (result == 0)
+    return 1;
 
-    if (!cache_entry_append(state->cache, buff, result)) {
-      fprintf(stderr, "Cannot store target data to cache\n");
-      return -1;
-    }
+  nparsed = http_parser_execute(&state->parser, &http_response_callbacks, buff,
+                                result);
+  if (nparsed != result) {
+    fprintf(stderr, "Cannot parse http input from target socket\n");
+    return -1;
   }
+
+  if (!cache_entry_append(state->cache, buff, result)) {
+    fprintf(stderr, "Cannot store target data to cache\n");
+    return -1;
+  }
+
+  return 0;
 }
 
 static void target_cleanup(target_state_t* state) {
@@ -94,8 +94,8 @@ void target_handler(int socket, int events, void* arg) {
     }
   }
 
-  // Handle hup
-  if (events & POLLHUP || state->message_complete) {
+  // Handle ending
+  if (state->message_complete) {
     // If not OK code, mark entry as invalid
     if (state->parser.status_code != 200)
       cache_entry_mark_invalid_and_finished(state->cache);

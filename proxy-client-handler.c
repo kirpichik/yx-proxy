@@ -87,7 +87,7 @@ static char* extract_path_from_url(char* url, size_t len) {
     if (slash_count == 3)
       return res;
   }
-  
+
   return NULL;
 }
 
@@ -102,7 +102,7 @@ static bool dump_initial_line(client_state_t* state) {
   char* method = get_method_by_id(state->parser.method);
   if (method == NULL)
     return false;
-  
+
   char* path = extract_path_from_url(state->url.str, state->url.len);
   if (path == NULL)
     return false;
@@ -341,25 +341,25 @@ static bool client_input_handler(client_state_t* state) {
   ssize_t result;
   size_t nparsed;
 
-  while (1) {
-    result = recv(state->socket, buff, BUFFER_SIZE, 0);
+  result = recv(state->socket, buff, BUFFER_SIZE, 0);
 
-    if (result == -1) {
-      if (errno != EAGAIN) {
-        perror("Cannot recv data from client");
-        return false;
-      }
-      return true;
-    } else if (result == 0)
-      return true;
-
-    nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff,
-                                  result);
-    if (nparsed != result || state->parse_error) {
-      fprintf(stderr, "Cannot parse http input from client socket\n");
+  if (result == -1) {
+    if (errno != EAGAIN) {
+      perror("Cannot recv data from client");
       return false;
     }
+    return true;
+  } else if (result == 0)
+    return true;
+
+  nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff,
+                                result);
+  if (nparsed != result || state->parse_error) {
+    fprintf(stderr, "Cannot parse http input from client socket\n");
+    return false;
   }
+
+  return true;
 }
 
 static void client_cleanup(client_state_t* state) {
