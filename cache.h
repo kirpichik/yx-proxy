@@ -12,7 +12,7 @@ struct cache_entry;
 typedef struct cache_entry_reader {
   void (*callback)(struct cache_entry*, size_t, void*);
   void* arg;
-  size_t offset;
+  size_t offset; // TODO - useless?
   struct cache_entry_reader* next;
 } cache_entry_reader_t;
 
@@ -41,6 +41,8 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
 
 bool cache_entry_unsubscribe(cache_entry_t* entry,
                              cache_entry_reader_t* reader);
+
+ssize_t cache_entry_extract(cache_entry_t* entry, size_t offset, char* buffer, size_t len);
 
 bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len);
 

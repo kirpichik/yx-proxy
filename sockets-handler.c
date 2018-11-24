@@ -75,9 +75,12 @@ int sockets_poll_loop(int server_socket) {
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
   listen(server_socket, POLL_SIZE);
 
-  while ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) != -2) {
-    if (count == -1 && errno == EINTR)
-      continue;
+  while (1) {
+    if ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) == -1) {
+      if (errno == EINTR)
+        continue;
+      break;
+    }
     for (size_t i = 0; i < state.polls_count; i++) {
       if (count == 0)
         break;
@@ -112,8 +115,7 @@ int sockets_poll_loop(int server_socket) {
     }
   }
 
-  perror("Cannot handle new clients");
-  interrupt_signal(0);
+  perror("Cannot use poll");
   return -1;
 }
 

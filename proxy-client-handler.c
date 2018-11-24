@@ -13,7 +13,7 @@
 
 #include "proxy-client-handler.h"
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 // Strings for HTTP protocol
 #define HEADER_CONNECTION "Connection"
@@ -23,8 +23,6 @@
 #define LINE_DELIM "\r\n"
 
 #define DEF_LEN(str) (sizeof(str) - 1)
-
-static void client_cleanup(client_state_t*);
 
 /**
  * Saves the data that required to send to proxying target.
@@ -144,15 +142,7 @@ static void accept_cache_updates(cache_entry_t* entry,
   if (entry->data.str == NULL)
     return;
 
-  if (entry->data.len - offset != 0) {
-    if (!pstring_append(&state->client_outbuff, entry->data.str + offset,
-                        entry->data.len - offset))
-      return;
-  }
-
-  // TODO - optimisation: try to send, before this
   sockets_enable_out_handle(state->socket);
-  return;
 }
 
 static bool establish_cached_connection(client_state_t* state, char* host) {
@@ -362,6 +352,26 @@ static bool client_input_handler(client_state_t* state) {
   return true;
 }
 
+static bool client_output_handler(client_state_t* state) {
+  char buff[BUFFER_SIZE];
+  ssize_t len = cache_entry_extract(state->cache, state->cache_offset, buff, BUFFER_SIZE);
+  if (len == -1)
+    return false;
+
+  if (len == 0) {
+    if (state->cache->finished)
+      return false;
+    sockets_cancel_out_handle(state->socket);
+    return true;
+  }
+  
+  state->cache_offset += len;
+  if (!pstring_append(&state->client_outbuff, buff, len))
+    return false;
+
+  return send_pstring(state->socket, &state->client_outbuff) != -1;
+}
+
 static void client_cleanup(client_state_t* state) {
   sockets_remove_socket(state->socket);
   cache_entry_unsubscribe(state->cache, state->reader);
@@ -378,11 +388,9 @@ void client_handler(int socket, int events, void* arg) {
 
   // Handle output
   if (events & POLLOUT) {
-    if (send_pstring(socket, &state->client_outbuff)) {
-      if (state->cache->finished)
-        client_cleanup(state);
-      else
-        sockets_cancel_out_handle(state->socket);
+    if (!client_output_handler(state)) {
+      client_cleanup(state);
+      return;
     }
   }
 

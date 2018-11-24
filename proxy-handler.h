@@ -25,6 +25,7 @@ typedef struct client_state {
   struct target_state* target;
   cache_entry_reader_t* reader;
   cache_entry_t* cache;
+  size_t cache_offset;
   bool use_cache;
 } client_state_t;
 
@@ -60,10 +61,10 @@ bool proxy_establish_connection(client_state_t* state, char* host);
  * @param socket Target socket.
  * @param buff Sending string.
  *
- * @return {@code true} if all string was sent, or store left string as
- * substring of buffer.
+ * @return Zero if all string was sent, or 1 if some output data stored
+ * as substring of buffer, or -1 if error occured.
  */
-bool send_pstring(int socket, pstring_t* buff);
+int send_pstring(int socket, pstring_t* buff);
 
 /**
  * Allocates and build header string from header entry.

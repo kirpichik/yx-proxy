@@ -81,11 +81,11 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     return false;
   }
 
+  memset(state->target, 0, sizeof(target_state_t));
   pstring_init(&state->target->outbuff);
   pstring_replace(&state->target->outbuff, state->target_outbuff.str,
                   state->target_outbuff.len);
   state->target->cache = state->cache;
-  state->target->message_complete = false;
   http_parser_init(&state->target->parser, HTTP_RESPONSE);
   state->target->parser.data = state->target;
 
@@ -154,17 +154,19 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   return true;
 }
 
-bool send_pstring(int socket, pstring_t* buff) {
+int send_pstring(int socket, pstring_t* buff) {
   size_t offset = 0;
   ssize_t result;
 
   while ((result = send(socket, buff->str + offset, buff->len - offset, 0)) !=
          buff->len - offset) {
     if (result == -1) {
-      if (errno != EWOULDBLOCK)
+      if (errno != EWOULDBLOCK) {
         perror("Cannot send data to socket");
+        return -1;
+      }
       pstring_substring(buff, offset);
-      return false;
+      return 1;
     }
 
     offset += result;
@@ -173,7 +175,7 @@ bool send_pstring(int socket, pstring_t* buff) {
   free(buff->str);
   pstring_init(buff);
 
-  return true;
+  return 0;
 }
 
 char* build_header_string(pstring_t* key,

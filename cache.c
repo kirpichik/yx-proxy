@@ -125,6 +125,21 @@ static void readers_foreach(cache_entry_t* entry, size_t len) {
   }
 }
 
+ssize_t cache_entry_extract(cache_entry_t* entry, size_t offset, char* buffer, size_t len) {
+  if (entry == NULL || buffer == NULL)
+    return -1;
+
+  if (entry->data.len < offset)
+    return -1;
+
+  size_t result_len = entry->data.len - offset;
+  if (result_len > len)
+    result_len = len;
+  
+  memcpy(buffer, entry->data.str + offset, result_len);
+  return result_len;
+}
+
 bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
   if (entry == NULL || data == NULL)
     return false;

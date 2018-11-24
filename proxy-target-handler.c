@@ -76,7 +76,11 @@ void target_handler(int socket, int events, void* arg) {
 
   // Handle output
   if (events & POLLOUT) {
-    if (send_pstring(socket, &state->outbuff))
+    result = send_pstring(socket, &state->outbuff);
+    if (result == -1) {
+      target_cleanup(state);
+      return;
+    } else if (result == 0)
       sockets_cancel_out_handle(state->socket);
   }
 
