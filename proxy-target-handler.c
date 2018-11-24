@@ -89,7 +89,7 @@ void target_handler(int socket, int events, void* arg) {
       target_cleanup(state);
       return;
     } else if (result == 1)
-      events |= POLLHUP;
+      state->message_complete = true;
   }
 
   // Handle hup

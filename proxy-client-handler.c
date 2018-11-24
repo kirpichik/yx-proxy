@@ -320,7 +320,7 @@ static http_parser_settings http_request_callbacks = {
     NULL  /* on_chunk_complete */
 };
 
-static int client_input_handler(client_state_t* state) {
+static bool client_input_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
   size_t nparsed;
@@ -331,17 +331,17 @@ static int client_input_handler(client_state_t* state) {
     if (result == -1) {
       if (errno != EAGAIN) {
         perror("Cannot recv data from client");
-        return -1;
+        return false;
       }
-      return 0;
+      return true;
     } else if (result == 0)
-      return 1;
+      return true;
 
     nparsed = http_parser_execute(&state->parser, &http_request_callbacks, buff,
                                   result);
     if (nparsed != result || state->parse_error) {
       fprintf(stderr, "Cannot parse http input from client socket\n");
-      return -1;
+      return false;
     }
   }
 }
@@ -359,7 +359,6 @@ static void client_cleanup(client_state_t* state) {
 
 void client_handler(int socket, int events, void* arg) {
   client_state_t* state = (client_state_t*)arg;
-  int result;
 
   // Handle output
   if (events & POLLOUT) {
@@ -373,12 +372,10 @@ void client_handler(int socket, int events, void* arg) {
 
   // Handle input
   if (events & (POLLIN | POLLPRI)) {
-    result = client_input_handler(state);
-    if (result == -1) {
+    if (!client_input_handler(state)) {
       client_cleanup(state);
       return;
-    } else if (result == 1)
-      events |= POLLHUP;
+    }
   }
 
   // Handle hup
