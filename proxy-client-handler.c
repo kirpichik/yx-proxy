@@ -74,6 +74,13 @@ static char* get_method_by_id(int id) {
   }
 }
 
+/**
+ * Extracts path from URL.
+ *
+ * http://example.com/path/to/target -> /path/to/target
+ *
+ * @return Extracted path or {@code NULL}.
+ */
 static char* extract_path_from_url(char* url, size_t len) {
   size_t slash_count = 0;
   char* res = url;
@@ -135,16 +142,20 @@ static bool dump_initial_line(client_state_t* state) {
   return result;
 }
 
-static void accept_cache_updates(cache_entry_t* entry,
-                                 size_t offset,
-                                 void* arg) {
+/**
+ * Handles target cache entry updates.
+ */
+static void accept_cache_updates(cache_entry_t* entry, void* arg) {
   client_state_t* state = (client_state_t*)arg;
-  if (entry->data.str == NULL)
-    return;
-
-  sockets_enable_out_handle(state->socket);
+  if (entry->data.str != NULL)
+    sockets_enable_out_handle(state->socket);
 }
 
+/**
+ * Searches for cache entry with required URL.
+ * If cache entry found, use it.
+ * If cache entry not found, creates connection and use it.
+ */
 static bool establish_cached_connection(client_state_t* state, char* host) {
   // FIXME - form url from state->url and host
   int result = cache_find_or_create(state->url.str, &state->cache);
@@ -178,6 +189,9 @@ static int handle_request_url(http_parser* parser, const char* at, size_t len) {
   return 0;
 }
 
+/**
+ * Dumps client header to target connection.
+ */
 static bool dump_buffered_header(client_state_t* state) {
   size_t len;
   char* line =
@@ -326,6 +340,9 @@ static http_parser_settings http_request_callbacks = {
     NULL  /* on_chunk_complete */
 };
 
+/**
+ * Handles client input data.
+ */
 static bool client_input_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
@@ -352,9 +369,13 @@ static bool client_input_handler(client_state_t* state) {
   return true;
 }
 
+/**
+ * Handles client output data.
+ */
 static bool client_output_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
-  ssize_t len = cache_entry_extract(state->cache, state->cache_offset, buff, BUFFER_SIZE);
+  ssize_t len =
+      cache_entry_extract(state->cache, state->cache_offset, buff, BUFFER_SIZE);
   if (len == -1)
     return false;
 
@@ -364,7 +385,7 @@ static bool client_output_handler(client_state_t* state) {
     sockets_cancel_out_handle(state->socket);
     return true;
   }
-  
+
   state->cache_offset += len;
   if (!pstring_append(&state->client_outbuff, buff, len))
     return false;
@@ -372,6 +393,9 @@ static bool client_output_handler(client_state_t* state) {
   return send_pstring(state->socket, &state->client_outbuff) != -1;
 }
 
+/**
+ * Cleanup all client data.
+ */
 static void client_cleanup(client_state_t* state) {
   sockets_remove_socket(state->socket);
   cache_entry_unsubscribe(state->cache, state->reader);

@@ -14,6 +14,9 @@
 
 #define BUFFER_SIZE 1024
 
+/**
+ * Handles target response initial line.
+ */
 static int handle_response_message_complete(http_parser* parser) {
   target_state_t* state = (target_state_t*)parser->data;
   state->message_complete = true;
@@ -33,6 +36,9 @@ static http_parser_settings http_response_callbacks = {
     NULL  /* on_chunk_complete */
 };
 
+/**
+ * Handles target input data.
+ */
 static int target_input_handler(target_state_t* state) {
   char buff[BUFFER_SIZE];
   ssize_t result;
@@ -64,6 +70,9 @@ static int target_input_handler(target_state_t* state) {
   return 0;
 }
 
+/**
+ * Cleanup all target data.
+ */
 static void target_cleanup(target_state_t* state) {
   sockets_remove_socket(state->socket);
   pstring_free(&state->outbuff);

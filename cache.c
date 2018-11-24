@@ -22,7 +22,7 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
     // Found invalid cache entry
     if (entry->next && entry->invalid) {
       // If no readers, delete it
-      if (entry->next->readers == NULL) {
+      if (entry->next->readers == NULL && entry->next->finished) {
         free(entry->next->url);
         pstring_free(&entry->next->data);
         cache_entry_t* temp = entry->next->next;
@@ -63,7 +63,6 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
 
 cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
                                             void (*callback)(cache_entry_t*,
-                                                             size_t,
                                                              void*),
                                             void* arg) {
   if (entry == NULL || callback == NULL)
@@ -120,12 +119,14 @@ static void readers_foreach(cache_entry_t* entry, size_t len) {
     // the callback you can delete the reader
     curr = reader;
     reader = reader->next;
-    curr->offset += len;
-    curr->callback(entry, curr->offset - len, curr->arg);
+    curr->callback(entry, curr->arg);
   }
 }
 
-ssize_t cache_entry_extract(cache_entry_t* entry, size_t offset, char* buffer, size_t len) {
+ssize_t cache_entry_extract(cache_entry_t* entry,
+                            size_t offset,
+                            char* buffer,
+                            size_t len) {
   if (entry == NULL || buffer == NULL)
     return -1;
 
@@ -135,7 +136,7 @@ ssize_t cache_entry_extract(cache_entry_t* entry, size_t offset, char* buffer, s
   size_t result_len = entry->data.len - offset;
   if (result_len > len)
     result_len = len;
-  
+
   memcpy(buffer, entry->data.str + offset, result_len);
   return result_len;
 }
@@ -172,11 +173,6 @@ void cache_entry_mark_invalid_and_finished(cache_entry_t* entry) {
     entry->invalid = true;
     readers_foreach(entry, 0);
   }
-}
-
-void cache_entry_drop(cache_entry_t* entry) {
-  // TODO
-  // FIXME - arg reference?
 }
 
 static void readers_free(cache_entry_reader_t* readers) {

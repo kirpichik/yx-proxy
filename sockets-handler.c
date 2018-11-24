@@ -28,6 +28,9 @@ typedef struct sockets_state {
   callback_t* callbacks;
 } sockets_state_t;
 
+/**
+ * Removes socket at required position.
+ */
 static void remove_socket_at(size_t);
 
 /**
@@ -35,6 +38,9 @@ static void remove_socket_at(size_t);
  */
 static sockets_state_t state;
 
+/**
+ * SIGINT handler.
+ */
 static void interrupt_signal(int sig) {
   close(state.polls[0].fd);
 
