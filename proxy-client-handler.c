@@ -24,6 +24,8 @@
 
 #define DEF_LEN(str) (sizeof(str) - 1)
 
+static void client_cleanup(client_state_t*);
+
 /**
  * Saves the data that required to send to proxying target.
  *
@@ -126,6 +128,9 @@ static void accept_cache_updates(cache_entry_t* entry, size_t offset, void* arg)
                         entry->data.str + offset,
                         entry->data.len - offset))
       return;
+  } else if (entry->finished) {
+    client_cleanup(state);
+    return;
   }
 
   // TODO - optimisation: try to send, before this
