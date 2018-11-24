@@ -13,7 +13,8 @@
 
 #include "sockets-handler.h"
 
-#define POLL_SIZE 50
+#define POLL_PRE_SIZE 50
+#define POLL_GROW_SPEED 2
 
 typedef struct callback {
   void (*callback)(int, int, void*);
@@ -22,8 +23,9 @@ typedef struct callback {
 
 typedef struct sockets_state {
   size_t polls_count;
-  struct pollfd polls[POLL_SIZE];
-  callback_t callbacks[POLL_SIZE];
+  size_t size;
+  struct pollfd* polls;
+  callback_t* callbacks;
 } sockets_state_t;
 
 static void remove_socket_at(size_t);
@@ -54,9 +56,12 @@ static void interrupt_signal(int sig) {
  * @param server_socket Socket for receiving new clients.
  */
 static void init_sockets_state(int server_socket) {
-  // Not required if state is global, but still do it for the future.
-  memset(state.polls, 0, sizeof(state.polls));
-  memset(state.callbacks, 0, sizeof(state.callbacks));
+  state.size = POLL_PRE_SIZE;
+
+  state.polls = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
+  state.callbacks = (callback_t*)malloc(sizeof(callback_t) * state.size);
+  memset(state.polls, 0, sizeof(struct pollfd) * state.size);
+  memset(state.callbacks, 0, sizeof(callback_t) * state.size);
 
   state.polls_count = 1;
   state.polls[0].fd = server_socket;
@@ -73,7 +78,7 @@ int sockets_poll_loop(int server_socket) {
   init_sockets_state(server_socket);
 
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
-  listen(server_socket, POLL_SIZE);
+  listen(server_socket, POLL_PRE_SIZE);
 
   while (1) {
     if ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) == -1) {
@@ -122,8 +127,14 @@ int sockets_poll_loop(int server_socket) {
 bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
                         void* arg) {
-  if (state.polls_count >= POLL_SIZE)
-    return false;
+  if (state.polls_count + 1 >= state.size) {
+    size_t size = state.size * POLL_GROW_SPEED;
+    state.polls = (struct pollfd*)realloc(state.polls, size);
+    state.callbacks = (callback_t*)realloc(state.callbacks, size);
+    memset(state.polls + state.size, 0, size - state.size);
+    memset(state.callbacks + state.size, 0, size - state.size);
+    state.size = size;
+  }
 
   state.polls[state.polls_count].fd = socket;
   state.polls[state.polls_count].events = 0;
