@@ -8,6 +8,7 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "proxy-handler.h"
 
@@ -22,10 +23,15 @@ typedef struct callback {
 } callback_t;
 
 typedef struct sockets_state {
+  pthread_mutex_t lock;
   size_t polls_count;
   size_t size;
   struct pollfd* polls;
   callback_t* callbacks;
+  size_t _polls_count_copy;
+  size_t _size_copy;
+  struct pollfd* _polls_copy;
+  callback_t* _callbacks_copy;
 } sockets_state_t;
 
 /**
@@ -61,78 +67,201 @@ static void interrupt_signal(int sig) {
  *
  * @param server_socket Socket for receiving new clients.
  */
-static void init_sockets_state(int server_socket) {
-  state.size = POLL_PRE_SIZE;
+static bool init_sockets_state(int server_socket) {
+  int errno_temp;
+
+  state.size = state._size_copy = POLL_PRE_SIZE;
 
   state.polls = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
+  if (state.polls == NULL)
+    return false;
   state.callbacks = (callback_t*)malloc(sizeof(callback_t) * state.size);
+  if (state.callbacks == NULL) {
+    errno_temp = errno;
+    free(state.polls);
+    errno = errno_temp;
+    return false;
+  }
   memset(state.polls, 0, sizeof(struct pollfd) * state.size);
   memset(state.callbacks, 0, sizeof(callback_t) * state.size);
+  
+  state._polls_copy = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
+  if (state._polls_copy == NULL) {
+    errno_temp = errno;
+    free(state.callbacks);
+    free(state.polls);
+    errno = errno_temp;
+    return false;
+  }
+  state._callbacks_copy = (callback_t*)malloc(sizeof(callback_t) * state.size);
+  if (state._callbacks_copy == NULL) {
+    errno_temp = errno;
+    free(state._polls_copy);
+    free(state.callbacks);
+    free(state.polls);
+    errno = errno_temp;
+    return false;
+  }
+  memset(state._polls_copy, 0, sizeof(struct pollfd) * state.size);
+  memset(state._callbacks_copy, 0, sizeof(callback_t) * state.size);
 
-  state.polls_count = 1;
-  state.polls[0].fd = server_socket;
-  state.polls[0].events = POLLIN | POLLPRI;
+  if ((errno_temp = pthread_mutex_init(&state.lock, NULL)) != 0) {
+    free(state._callbacks_copy);
+    free(state._polls_copy);
+    free(state.callbacks);
+    free(state.polls);
+    errno = errno_temp;
+    return false;
+  }
+
+  state.polls_count = state._polls_count_copy = 1;
+  state.polls[0].fd = state._polls_copy[0].fd = server_socket;
+  state.polls[0].events = state._polls_copy[0].events = POLLIN | POLLPRI;
 
   signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, &interrupt_signal);
+
+  return true;
+}
+
+/**
+ * Prepares new dataset for poll execution.
+ * Copy new sockets, flags and callbacks from polls and callbacks
+ * state fields to _polls_copy and _callbacks_copy fields.
+ *
+ * @return {@code true} if success, or {@code false} and sets errno value.
+ */
+static bool copy_state() {
+  int errno_temp;
+
+  if ((errno_temp = pthread_mutex_lock(&state.lock) != 0)) {
+    errno = errno_temp;
+    return false;
+  }
+
+  if (state._size_copy < state.size) {
+    state._polls_copy = (struct pollfd*)realloc(state._polls_copy,
+                                                sizeof(struct pollfd) * state.size);
+    if (state._polls_copy == NULL)
+      return false;
+    state._callbacks_copy = (callback_t*)realloc(state._callbacks_copy,
+                                                 sizeof(callback_t) * state.size);
+    if (state._callbacks_copy == NULL)
+      return false;
+
+    state._size_copy = state.size;
+  }
+
+  // Check if new data contains less sockets than old
+  if (state._polls_count_copy > state.polls_count) {
+    size_t diff = state._polls_count_copy - state.polls_count;
+    memset(state._polls_copy + state.polls_count, 0, sizeof(struct pollfd) * diff);
+    memset(state._callbacks_copy + state.polls_count, 0, sizeof(callback_t) * diff);
+  }
+
+  memcpy(state._polls_copy, state.polls, sizeof(struct pollfd) * state.polls_count);
+  memcpy(state._callbacks_copy, state.callbacks, sizeof(callback_t) * state.polls_count);
+  state._polls_count_copy = state.polls_count;
+  
+  if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
+    errno = errno_temp;
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Handles poll syscall result.
+ *
+ * @param count Amount of updated sockets.
+ *
+ * @return {@code true} if success.
+ */
+static bool handle_polls_update(size_t count) {
+  int revents;
+  int socket;
+
+  for (size_t i = 0; i < state._polls_count_copy; i++) {
+    if (count == 0)
+      break;
+    
+    revents = state._polls_copy[i].revents;
+    state._polls_copy[i].revents = 0;
+    
+    // Skip sockets unchanged
+    if (revents == 0)
+      continue;
+    count--;
+    
+    // Handle server socket
+    if (i == 0) {
+      if (revents & POLLPRI || revents & POLLIN) {
+        socket = accept(state._polls_copy[0].fd, NULL, NULL);
+        fcntl(socket, F_SETFL, O_NONBLOCK);
+#ifdef _PROXY_DEBUG
+        fprintf(stderr, "Accept new client socket.\n");
+#endif
+        proxy_accept_client(socket);
+      } else {
+        fprintf(stderr, "Cannot accept new clients\n");
+        close(state._polls_copy[0].fd);
+        return false;
+      }
+      continue;
+    }
+    
+    callback_t* cb = &state._callbacks_copy[i];
+    cb->callback(state._polls_copy[i].fd, revents, cb->arg);
+  }
+  
+  return true;
 }
 
 int sockets_poll_loop(int server_socket) {
   int count;
-  int revents;
-  int socket;
-  init_sockets_state(server_socket);
+
+  if (!init_sockets_state(server_socket)) {
+    perror("Cannot init sockets state");
+    return -1;
+  }
 
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
   listen(server_socket, POLL_PRE_SIZE);
 
   while (1) {
-    if ((count = poll(state.polls, (nfds_t)state.polls_count, -1)) == -1) {
+    if ((count = poll(state._polls_copy, (nfds_t)state._polls_count_copy, -1)) == -1) {
       if (errno == EINTR)
         continue;
       break;
     }
-    for (size_t i = 0; i < state.polls_count; i++) {
-      if (count == 0)
-        break;
 
-      revents = state.polls[i].revents;
-      state.polls[i].revents = 0;
-
-      // Skip sockets unchanged
-      if (revents == 0)
-        continue;
-      count--;
-
-      // Handle server socket
-      if (i == 0) {
-        if (revents & POLLPRI || revents & POLLIN) {
-          socket = accept(server_socket, NULL, NULL);
-          fcntl(socket, F_SETFL, O_NONBLOCK);
-#ifdef _PROXY_DEBUG
-          fprintf(stderr, "Accept new client socket.\n");
-#endif
-          proxy_accept_client(socket);
-        } else {
-          fprintf(stderr, "Cannot accept new clients\n");
-          close(server_socket);
-          return 1;
-        }
-        continue;
-      }
-
-      callback_t* cb = &state.callbacks[i];
-      cb->callback(state.polls[i].fd, revents, cb->arg);
-    }
+    if (!handle_polls_update(count))
+      return 1;
+    
+    if (!copy_state())
+      break;
   }
 
-  perror("Cannot use poll");
+  perror("Cannot handle sockets");
   return -1;
 }
+
+#define LOCK_POLLS() if ((errno = pthread_mutex_lock(&state.lock) != 0)) { \
+                     perror("Cannot lock sockets state"); \
+                     return false; \
+                   }
+
+#define UNLOCK_POLLS() if ((errno = pthread_mutex_unlock(&state.lock) != 0)) { \
+                         perror("Cannot unlock sockets state"); \
+                         return false; \
+                       }
 
 bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
                         void* arg) {
+  LOCK_POLLS();
+  
   if (state.polls_count + 1 >= state.size) {
     size_t size = state.size * POLL_GROW_SPEED;
     state.polls = (struct pollfd*)realloc(state.polls, size);
@@ -148,6 +277,7 @@ bool sockets_add_socket(int socket,
   state.callbacks[state.polls_count].arg = arg;
   state.polls_count++;
 
+  UNLOCK_POLLS();
   return true;
 }
 
@@ -166,42 +296,51 @@ static ssize_t find_socket(int socket) {
 }
 
 bool sockets_enable_in_handle(int socket) {
+  LOCK_POLLS();
+  
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
 
   state.polls[pos].events |= POLLIN | POLLPRI;
 
+  UNLOCK_POLLS();
   return true;
 }
 
 bool sockets_enable_out_handle(int socket) {
+  LOCK_POLLS();
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
 
   state.polls[pos].events |= POLLOUT;
 
+  UNLOCK_POLLS();
   return true;
 }
 
 bool sockets_cancel_in_handle(int socket) {
+  LOCK_POLLS();
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
 
   state.polls[pos].events &= ~(POLLIN | POLLPRI);
 
+  UNLOCK_POLLS();
   return true;
 }
 
 bool sockets_cancel_out_handle(int socket) {
+  LOCK_POLLS();
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
 
   state.polls[pos].events &= ~POLLOUT;
 
+  UNLOCK_POLLS();
   return true;
 }
 
@@ -218,12 +357,20 @@ static void remove_socket_at(size_t pos) {
 }
 
 bool sockets_remove_socket(int socket) {
+  LOCK_POLLS();
+
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
 
   remove_socket_at(pos);
+
+  UNLOCK_POLLS();
+  
   close(socket);
 
   return true;
 }
+
+#undef LOCK_POLLS
+#undef UNLOCK_POLLS

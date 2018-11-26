@@ -1,4 +1,4 @@
-# Simple pseudo-multithreading caching proxy for POSIX systems
+# Simple multithreading caching proxy for POSIX systems
 
 This proxy supports only HTTP/1.0.
 
