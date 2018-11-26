@@ -1,6 +1,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #include "pstring.h"
 
@@ -17,14 +18,16 @@ typedef struct cache_entry_reader {
 
 typedef struct cache_entry {
   char* url;
-  bool finished;
-  bool invalid;
+  volatile bool finished;
+  volatile bool invalid;
   pstring_t data;
   cache_entry_reader_t* readers;
+  pthread_rwlock_t lock;
   struct cache_entry* next;
 } cache_entry_t;
 
 typedef struct cache {
+  pthread_mutex_t global_lock;
   cache_entry_t* list;
 } cache_t;
 
