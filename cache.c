@@ -76,11 +76,10 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   }
   reader->callback = callback;
   reader->arg = arg;
-  reader->offset = 0;
   reader->next = entry->readers;
   entry->readers = reader;
 
-  callback(entry, 0, arg);
+  callback(entry, arg);
 
   return reader;
 }
