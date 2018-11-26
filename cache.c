@@ -1,8 +1,8 @@
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 
 #include "cache.h"
 
@@ -16,12 +16,12 @@ bool cache_init(void) {
 int cache_find_or_create(char* url, cache_entry_t** result) {
   if (url == NULL)
     return -1;
-  
+
   if ((errno = pthread_mutex_lock(&cache.global_lock)) != 0) {
     perror("Cannot lock global cache");
     return -1;
   }
-  
+
   cache_entry_t* entry = cache.list;
 
   while (entry) {
@@ -95,7 +95,7 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   }
   reader->callback = callback;
   reader->arg = arg;
-  
+
   if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
     perror("Cannot subscribe cache entry reader");
     free(reader);
@@ -117,7 +117,7 @@ bool cache_entry_unsubscribe(cache_entry_t* entry,
   cache_entry_reader_t* curr;
   if (entry == NULL || reader == NULL)
     return false;
-  
+
   if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
     perror("Cannot unsubscribe cache entry reader");
     return false;
@@ -152,7 +152,7 @@ ssize_t cache_entry_extract(cache_entry_t* entry,
                             size_t len) {
   if (entry == NULL || buffer == NULL)
     return -1;
-  
+
   if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
     perror("Cannot use read lock for cache entry");
     return -1;
@@ -168,7 +168,7 @@ ssize_t cache_entry_extract(cache_entry_t* entry,
     result_len = len;
 
   memcpy(buffer, entry->data.str + offset, result_len);
-  
+
   pthread_rwlock_unlock(&entry->lock);
   return result_len;
 }
@@ -188,7 +188,7 @@ static void readers_foreach(cache_entry_t* entry, size_t len) {
 bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
   if (entry == NULL || data == NULL)
     return false;
-  
+
   if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
     perror("Cannot lock cache entry in entry append");
     return false;
@@ -199,7 +199,7 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
     pthread_rwlock_unlock(&entry->lock);
     return false;
   }
-  
+
   pthread_rwlock_unlock(&entry->lock);
 
   readers_foreach(entry, len);
@@ -248,6 +248,6 @@ void cache_free(void) {
     free(curr);
     curr = cache.list;
   }
-  
+
   pthread_mutex_destroy(&cache.global_lock);
 }

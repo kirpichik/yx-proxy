@@ -1,14 +1,13 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <pthread.h>
 
 #include "proxy-handler.h"
 
@@ -78,8 +77,9 @@ static bool init_sockets_state(int server_socket) {
   }
   memset(state.polls, 0, sizeof(struct pollfd) * state.size);
   memset(state.callbacks, 0, sizeof(callback_t) * state.size);
-  
-  state._polls_copy = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
+
+  state._polls_copy =
+      (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
   if (state._polls_copy == NULL) {
     errno_temp = errno;
     free(state.callbacks);
@@ -131,12 +131,12 @@ static bool copy_state() {
   }
 
   if (state._size_copy < state.size) {
-    state._polls_copy = (struct pollfd*)realloc(state._polls_copy,
-                                                sizeof(struct pollfd) * state.size);
+    state._polls_copy = (struct pollfd*)realloc(
+        state._polls_copy, sizeof(struct pollfd) * state.size);
     if (state._polls_copy == NULL)
       return false;
-    state._callbacks_copy = (callback_t*)realloc(state._callbacks_copy,
-                                                 sizeof(callback_t) * state.size);
+    state._callbacks_copy = (callback_t*)realloc(
+        state._callbacks_copy, sizeof(callback_t) * state.size);
     if (state._callbacks_copy == NULL)
       return false;
 
@@ -146,14 +146,18 @@ static bool copy_state() {
   // Check if new data contains less sockets than old
   if (state._polls_count_copy > state.polls_count) {
     size_t diff = state._polls_count_copy - state.polls_count;
-    memset(state._polls_copy + state.polls_count, 0, sizeof(struct pollfd) * diff);
-    memset(state._callbacks_copy + state.polls_count, 0, sizeof(callback_t) * diff);
+    memset(state._polls_copy + state.polls_count, 0,
+           sizeof(struct pollfd) * diff);
+    memset(state._callbacks_copy + state.polls_count, 0,
+           sizeof(callback_t) * diff);
   }
 
-  memcpy(state._polls_copy, state.polls, sizeof(struct pollfd) * state.polls_count);
-  memcpy(state._callbacks_copy, state.callbacks, sizeof(callback_t) * state.polls_count);
+  memcpy(state._polls_copy, state.polls,
+         sizeof(struct pollfd) * state.polls_count);
+  memcpy(state._callbacks_copy, state.callbacks,
+         sizeof(callback_t) * state.polls_count);
   state._polls_count_copy = state.polls_count;
-  
+
   if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
     errno = errno_temp;
     return false;
@@ -176,15 +180,15 @@ static bool handle_polls_update(size_t count) {
   for (size_t i = 0; i < state._polls_count_copy; i++) {
     if (count == 0)
       break;
-    
+
     revents = state._polls_copy[i].revents;
     state._polls_copy[i].revents = 0;
-    
+
     // Skip sockets unchanged
     if (revents == 0)
       continue;
     count--;
-    
+
     // Handle server socket
     if (i == 0) {
       if (revents & POLLPRI || revents & POLLIN) {
@@ -201,11 +205,11 @@ static bool handle_polls_update(size_t count) {
       }
       continue;
     }
-    
+
     callback_t* cb = &state._callbacks_copy[i];
     cb->callback(state._polls_copy[i].fd, revents, cb->arg);
   }
-  
+
   return true;
 }
 
@@ -221,7 +225,8 @@ int sockets_poll_loop(int server_socket) {
   listen(server_socket, POLL_PRE_SIZE);
 
   while (1) {
-    if ((count = poll(state._polls_copy, (nfds_t)state._polls_count_copy, -1)) == -1) {
+    if ((count = poll(state._polls_copy, (nfds_t)state._polls_count_copy,
+                      -1)) == -1) {
       if (errno == EINTR)
         continue;
       break;
@@ -229,7 +234,7 @@ int sockets_poll_loop(int server_socket) {
 
     if (!handle_polls_update(count))
       return 1;
-    
+
     if (!copy_state())
       break;
   }
@@ -238,21 +243,23 @@ int sockets_poll_loop(int server_socket) {
   return -1;
 }
 
-#define LOCK_POLLS() if ((errno = pthread_mutex_lock(&state.lock) != 0)) { \
-                     perror("Cannot lock sockets state"); \
-                     return false; \
-                   }
+#define LOCK_POLLS()                                    \
+  if ((errno = pthread_mutex_lock(&state.lock) != 0)) { \
+    perror("Cannot lock sockets state");                \
+    return false;                                       \
+  }
 
-#define UNLOCK_POLLS() if ((errno = pthread_mutex_unlock(&state.lock) != 0)) { \
-                         perror("Cannot unlock sockets state"); \
-                         return false; \
-                       }
+#define UNLOCK_POLLS()                                    \
+  if ((errno = pthread_mutex_unlock(&state.lock) != 0)) { \
+    perror("Cannot unlock sockets state");                \
+    return false;                                         \
+  }
 
 bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
                         void* arg) {
   LOCK_POLLS();
-  
+
   if (state.polls_count + 1 >= state.size) {
     size_t size = state.size * POLL_GROW_SPEED;
     state.polls = (struct pollfd*)realloc(state.polls, size);
@@ -288,7 +295,7 @@ static ssize_t find_socket(int socket) {
 
 bool sockets_enable_in_handle(int socket) {
   LOCK_POLLS();
-  
+
   ssize_t pos = find_socket(socket);
   if (pos == -1)
     return false;
@@ -357,7 +364,7 @@ bool sockets_remove_socket(int socket) {
   remove_socket_at(pos);
 
   UNLOCK_POLLS();
-  
+
   close(socket);
 
   return true;

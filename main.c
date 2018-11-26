@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
   fprintf(stderr, "Server socket bound.\n");
 
   cache_init();
-  
+
   signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, &interrupt_handler);
 
