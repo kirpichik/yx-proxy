@@ -12,6 +12,11 @@
 int sockets_poll_loop(int server_socket);
 
 /**
+ * Destroy sockets loop.
+ */
+void sockets_destroy(void);
+
+/**
  * Adds new socket for processing.
  *
  * @param socket New socket.

@@ -44,10 +44,7 @@ static void remove_socket_at(size_t);
  */
 static sockets_state_t state;
 
-/**
- * SIGINT handler.
- */
-static void interrupt_signal(int sig) {
+void sockets_destroy() {
   close(state.polls[0].fd);
 
   while (state.polls_count-- > 1) {
@@ -57,9 +54,6 @@ static void interrupt_signal(int sig) {
     else
       cb->callback(state.polls[1].fd, POLLHUP, cb->arg);
   }
-
-  printf("Server closed.\n");
-  exit(0);
 }
 
 /**
@@ -117,9 +111,6 @@ static bool init_sockets_state(int server_socket) {
   state.polls_count = state._polls_count_copy = 1;
   state.polls[0].fd = state._polls_copy[0].fd = server_socket;
   state.polls[0].events = state._polls_copy[0].events = POLLIN | POLLPRI;
-
-  signal(SIGPIPE, SIG_IGN);
-  signal(SIGINT, &interrupt_signal);
 
   return true;
 }

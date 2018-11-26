@@ -7,6 +7,13 @@
 #include "cache.h"
 #include "sockets-handler.h"
 
+static void interrupt_handler(int signal) {
+  sockets_destroy();
+  cache_free();
+  printf("Server closed.\n");
+  exit(0);
+}
+
 int main(int argc, char* argv[]) {
   struct sockaddr_in addr;
   int server_socket;
@@ -37,6 +44,9 @@ int main(int argc, char* argv[]) {
   fprintf(stderr, "Server socket bound.\n");
 
   cache_init();
+  
+  signal(SIGPIPE, SIG_IGN);
+  signal(SIGINT, &interrupt_handler);
 
   return sockets_poll_loop(server_socket);
 }
