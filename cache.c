@@ -28,6 +28,7 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
     // Found invalid cache entry
     if (entry->next && entry->invalid) {
       // If no readers, delete it
+      // TODO - lock this?
       if (entry->next->readers == NULL && entry->next->finished) {
         free(entry->next->url);
         pstring_free(&entry->next->data);

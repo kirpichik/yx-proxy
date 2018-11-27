@@ -13,6 +13,7 @@
 #include "sockets-handler.h"
 
 #include "proxy-client-handler.h"
+#include "proxy-utils.h"
 
 #define BUFFER_SIZE 4096
 
@@ -55,7 +56,6 @@ static bool send_to_target(client_state_t* state,
   }
   pthread_mutex_unlock(&state->target->lock);
 
-  // TODO - optimisation: try to send, before this
   sockets_enable_out_handle(state->target->socket);
   sockets_cancel_in_handle(state->socket);
 
@@ -311,9 +311,7 @@ static int handle_request_headers_complete(http_parser* parser) {
   }
   send_to_target(state, LINE_DELIM, DEF_LEN(LINE_DELIM));
 
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Request headers complete.\n");
-#endif
+  PROXY_DEBUG("Request headers complete.");
 
   return 0;
 }
@@ -398,7 +396,8 @@ static bool client_output_handler(client_state_t* state) {
   if (!pstring_append(&state->client_outbuff, buff, len))
     return false;
 
-  return send_pstring(state->socket, &state->client_outbuff) != -1;
+  int value = send_pstring(state->socket, &state->client_outbuff);
+  return value != -1;
 }
 
 /**
@@ -418,11 +417,8 @@ static void client_cleanup(client_state_t* state) {
   free(state);
 }
 
-void* client_thread(void* arg) {
-  client_state_t* state = (client_state_t*)arg;
-  int events;
-
-  // Block SIGUSR1
+static bool client_init(client_state_t* state) {
+  // Block SIGUSR2
   sigset_t signals;
   sigemptyset(&signals);
   sigaddset(&signals, SIGUSR2);
@@ -430,15 +426,25 @@ void* client_thread(void* arg) {
 
   if (!sockets_add_socket(state->socket, &client_handler, state)) {
     client_cleanup(state);
-    return NULL;
+    return false;
   }
   sockets_enable_in_handle(state->socket);
 
   if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
     perror("Cannot lock client lock");
     client_cleanup(state);
-    return NULL;
+    return false;
   }
+
+  return true;
+}
+
+void* client_thread(void* arg) {
+  client_state_t* state = (client_state_t*)arg;
+  int events;
+
+  if (!client_init(state))
+    return NULL;
 
   while (1) {
     if ((errno = pthread_cond_wait(&state->notifier, &state->lock)) != 0) {

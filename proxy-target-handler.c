@@ -56,11 +56,13 @@ static int target_input_handler(target_state_t* state) {
   } else if (result == 0)
     return 1;
 
-  nparsed = http_parser_execute(&state->parser, &http_response_callbacks, buff,
-                                result);
-  if (nparsed != result) {
-    fprintf(stderr, "Cannot parse http input from target socket\n");
-    return -1;
+  if (state->parser.status_code == 0) {
+    nparsed = http_parser_execute(&state->parser, &http_response_callbacks,
+                                  buff, result);
+    if (nparsed != result) {
+      fprintf(stderr, "Cannot parse http input from target socket\n");
+      return -1;
+    }
   }
 
   if (!cache_entry_append(state->cache, buff, result)) {
@@ -83,12 +85,8 @@ static void target_cleanup(target_state_t* state) {
   free(state);
 }
 
-void* target_thread(void* arg) {
-  target_state_t* state = (target_state_t*)arg;
-  int result;
-  int events;
-
-  // Block SIGUSR1
+static bool target_init(target_state_t* state) {
+  // Block SIGUSR2
   sigset_t signals;
   sigemptyset(&signals);
   sigaddset(&signals, SIGUSR2);
@@ -96,15 +94,26 @@ void* target_thread(void* arg) {
 
   if (!sockets_add_socket(state->socket, &target_handler, state)) {
     target_cleanup(state);
-    return NULL;
+    return false;
   }
-  sockets_enable_in_handle(state->socket);
+  sockets_enable_io_handle(state->socket);
 
   if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
     perror("Cannot lock target lock");
     target_cleanup(state);
-    return NULL;
+    return false;
   }
+
+  return true;
+}
+
+void* target_thread(void* arg) {
+  target_state_t* state = (target_state_t*)arg;
+  int result;
+  int events;
+
+  if (!target_init(state))
+    return NULL;
 
   while (1) {
     if ((errno = pthread_cond_wait(&state->notifier, &state->lock))) {

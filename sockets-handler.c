@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "proxy-handler.h"
-
+#include "proxy-utils.h"
 #include "sockets-handler.h"
 
 #define POLL_PRE_SIZE 50
@@ -211,9 +211,7 @@ static bool handle_polls_update(size_t count) {
       if (revents & POLLPRI || revents & POLLIN) {
         socket = accept(state._polls_copy[0].fd, NULL, NULL);
         fcntl(socket, F_SETFL, O_NONBLOCK);
-#ifdef _PROXY_DEBUG
-        fprintf(stderr, "Accept new client socket.\n");
-#endif
+        PROXY_DEBUG("Accept new client socket.");
         proxy_accept_client(socket);
       } else {
         fprintf(stderr, "Cannot accept new clients\n");

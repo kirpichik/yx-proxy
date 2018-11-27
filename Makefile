@@ -23,7 +23,8 @@ HEADERS=sockets-handler.h\
 				proxy-handler.h\
 				proxy-client-handler.h\
 				proxy-target-handler.h\
-				http-parser.h
+				http-parser.h\
+				proxy-utils.h
 
 # Compiler output
 OBJECTS=$(SOURCES:.c=.o)

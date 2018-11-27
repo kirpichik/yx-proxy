@@ -14,17 +14,14 @@
 
 #include "proxy-handler.h"
 
-#define DEFAULT_HTTP_PORT 80
-
 void proxy_accept_client(int socket) {
   pthread_attr_t attr;
 
-  client_state_t* state = (client_state_t*)malloc(sizeof(client_state_t));
+  client_state_t* state = (client_state_t*)calloc(1, sizeof(client_state_t));
   if (state == NULL) {
     perror("Cannot allocate state for connection");
     goto error_malloc;
   }
-  memset(state, 0, sizeof(client_state_t));
 
   if ((errno = pthread_mutex_init(&state->lock, NULL)) != 0) {
     perror("Cannot create mutex for client");
@@ -42,15 +39,8 @@ void proxy_accept_client(int socket) {
   }
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-  http_parser_init(&state->parser, HTTP_REQUEST);
-
   state->socket = socket;
-  pstring_init(&state->client_outbuff);
-  pstring_init(&state->target_outbuff);
-  pstring_init(&state->header_key);
-  pstring_init(&state->header_value);
-  pstring_init(&state->url);
-
+  http_parser_init(&state->parser, HTTP_REQUEST);
   state->parser.data = state;
 
   if ((errno = pthread_create(&state->thread, &attr, &client_thread, state))) {
@@ -72,43 +62,66 @@ error_malloc:
   close(socket);
 }
 
-/**
- * Resolves hostname to IP-address.
- *
- * @param hostname Required hostname.
- *
- * @return IP-address struct.
- */
-static struct in_addr* resolve_hostname(char* hostname) {
-  struct hostent* entry = gethostbyname(hostname);
-  if (entry == NULL)
-    return NULL;
+static int connect_target(char* host) {
+  struct addrinfo hints, *result;
+  char* split_pos = strrchr(host, ':');
+  int sock = -1;
+  char* hostname = host;
+  char* port = "http";
+  if (split_pos != NULL) {
+    hostname = (char*)malloc((size_t)(split_pos - host + 1));
+    memcpy(hostname, host, (size_t)(split_pos - host));
+    hostname[split_pos - host] = '\0';
+    port = host + (split_pos - host) + 1;
+  }
 
-  return (struct in_addr*)entry->h_addr_list[0];
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Connecting to %s...\n", host);
+#endif
+
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = PF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  int error = getaddrinfo(hostname, port, &hints, &result);
+  if (error) {
+    fprintf(stderr, "Cannot resolve %s: %s", host, gai_strerror(error));
+    if (hostname != host)
+      free(hostname);
+    return -1;
+  }
+
+  sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+  if (sock < 0) {
+    perror("Cannot create target socket");
+    goto cleanup;
+  }
+
+  if (connect(sock, result->ai_addr, result->ai_addrlen) < 0) {
+    perror("Cannot connect to target");
+    close(sock);
+    sock = -1;
+    goto cleanup;
+  }
+
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Connected to %s\n", host);
+#endif
+
+cleanup:
+  if (hostname != host)
+    free(hostname);
+  freeaddrinfo(result);
+  return sock;
 }
 
 bool proxy_establish_connection(client_state_t* state, char* host) {
   pthread_attr_t attr;
-  struct sockaddr_in addr;
-  struct in_addr* resolved;
-  char* hostname = host;
-  int port = DEFAULT_HTTP_PORT;
-  char* split_pos = strrchr(host, ':');
 
-  if (split_pos != NULL) {
-    port = atoi(host + (split_pos - host) + 1);
-    hostname = (char*)malloc((size_t)(split_pos - host + 1));
-    memcpy(hostname, host, (size_t)(split_pos - host));
-    hostname[split_pos - host] = '\0';
-  }
-
-  state->target = (target_state_t*)malloc(sizeof(target_state_t));
+  state->target = (target_state_t*)calloc(1, sizeof(target_state_t));
   if (state->target == NULL) {
     perror("Cannot allocate target state");
     return false;
   }
-
-  memset(state->target, 0, sizeof(target_state_t));
 
   if ((errno = pthread_mutex_init(&state->target->lock, NULL)) != 0) {
     perror("Cannot create mutex for target");
@@ -126,52 +139,15 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   }
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
+  http_parser_init(&state->target->parser, HTTP_RESPONSE);
+  state->target->parser.data = state->target;
+  state->target->cache = state->cache;
   pstring_init(&state->target->outbuff);
   pstring_replace(&state->target->outbuff, state->target_outbuff.str,
                   state->target_outbuff.len);
-  state->target->cache = state->cache;
-  http_parser_init(&state->target->parser, HTTP_RESPONSE);
-  state->target->parser.data = state->target;
 
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Resolving %s...\n", hostname);
-#endif
-
-  if ((resolved = resolve_hostname(hostname)) == NULL) {
-    fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
-    if (hostname != host)
-      free(hostname);
+  if ((state->target->socket = connect_target(host)) < 0)
     goto error_socket;
-  }
-
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Hostname %s resolved as %s\n", hostname,
-          inet_ntoa(*((struct in_addr*)resolved)));
-#endif
-
-  addr.sin_addr.s_addr = *((in_addr_t*)resolved);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-
-  if (hostname != host)
-    free(hostname);
-
-  state->target->socket = socket(AF_INET, SOCK_STREAM, 0);
-  if (state->target->socket < 0) {
-    perror("Cannot create target socket");
-    goto error_socket;
-  }
-
-  if (connect(state->target->socket, (struct sockaddr*)&addr, sizeof(addr)) ==
-      -1) {
-    perror("Cannot connect to target");
-    close(state->target->socket);
-    goto error_socket;
-  }
-
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Connection established with %s\n", hostname);
-#endif
 
   if ((errno = pthread_create(&state->target->thread, &attr, &target_thread,
                               state->target)) != 0) {
