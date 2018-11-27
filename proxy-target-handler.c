@@ -1,12 +1,12 @@
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <signal.h>
 
 #include "proxy-handler.h"
 #include "sockets-handler.h"
@@ -93,12 +93,12 @@ void* target_thread(void* arg) {
   sigemptyset(&signals);
   sigaddset(&signals, SIGUSR2);
   pthread_sigmask(SIG_BLOCK, &signals, NULL);
-  
+
   if (!sockets_add_socket(state->socket, &target_handler, state)) {
     target_cleanup(state);
     return NULL;
   }
-  sockets_enable_io_handle(state->socket);
+  sockets_enable_in_handle(state->socket);
 
   if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
     perror("Cannot lock target lock");
@@ -113,7 +113,7 @@ void* target_thread(void* arg) {
       return NULL;
     }
     events = state->revents;
-    
+
     // Handle output
     if (events & POLLOUT) {
       result = send_pstring(state->socket, &state->outbuff);
@@ -123,7 +123,7 @@ void* target_thread(void* arg) {
       } else if (result == 0)
         sockets_cancel_out_handle(state->socket);
     }
-    
+
     // Handle input
     if (events & (POLLIN | POLLPRI)) {
       result = target_input_handler(state);
@@ -137,7 +137,7 @@ void* target_thread(void* arg) {
         continue;
       }
     }
-    
+
     // Handle ending
     if (state->message_complete) {
       // If not OK code, mark entry as invalid

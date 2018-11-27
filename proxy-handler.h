@@ -1,6 +1,6 @@
 
-#include <stdbool.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #include "cache.h"
 #include "http-parser.h"

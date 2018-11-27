@@ -1,9 +1,9 @@
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -427,7 +427,7 @@ void* client_thread(void* arg) {
   sigemptyset(&signals);
   sigaddset(&signals, SIGUSR2);
   pthread_sigmask(SIG_BLOCK, &signals, NULL);
-  
+
   if (!sockets_add_socket(state->socket, &client_handler, state)) {
     client_cleanup(state);
     return NULL;
@@ -447,7 +447,7 @@ void* client_thread(void* arg) {
       return NULL;
     }
     events = state->revents;
-    
+
     // Handle output
     if (events & POLLOUT) {
       if (!client_output_handler(state)) {
@@ -455,7 +455,7 @@ void* client_thread(void* arg) {
         return NULL;
       }
     }
-    
+
     // Handle input
     if (events & (POLLIN | POLLPRI)) {
       if (!client_input_handler(state)) {
@@ -463,7 +463,7 @@ void* client_thread(void* arg) {
         return NULL;
       }
     }
-    
+
     // Handle hup
     if (events & POLLHUP) {
       client_cleanup(state);

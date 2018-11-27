@@ -2,10 +2,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -139,7 +139,7 @@ static bool copy_state() {
     errno = errno_temp;
     return false;
   }
-  
+
   if (!state.changed) {
     pthread_mutex_unlock(&state.lock);
     return true;
@@ -291,7 +291,7 @@ bool sockets_add_socket(int socket,
   state.callbacks[state.polls_count].callback = callback;
   state.callbacks[state.polls_count].arg = arg;
   state.polls_count++;
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
@@ -324,11 +324,11 @@ bool sockets_enable_in_handle(int socket) {
   }
 
   state.polls[pos].events |= POLLIN | POLLPRI;
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
-  
+
   pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
@@ -342,7 +342,7 @@ bool sockets_enable_out_handle(int socket) {
   }
 
   state.polls[pos].events |= POLLOUT;
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
@@ -358,13 +358,13 @@ bool sockets_enable_io_handle(int socket) {
     UNLOCK_POLLS();
     return false;
   }
-  
+
   state.polls[pos].events |= POLLOUT | POLLIN | POLLPRI;
-  
+
   state.changed = true;
-  
+
   UNLOCK_POLLS();
-  
+
   pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
@@ -378,7 +378,7 @@ bool sockets_cancel_in_handle(int socket) {
   }
 
   state.polls[pos].events &= ~(POLLIN | POLLPRI);
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
@@ -396,7 +396,7 @@ bool sockets_cancel_out_handle(int socket) {
   }
 
   state.polls[pos].events &= ~POLLOUT;
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
@@ -411,13 +411,13 @@ bool sockets_cancel_io_handle(int socket) {
   if (pos == -1) {
     return false;
   }
-  
+
   state.polls[pos].events &= ~(POLLOUT | POLLIN | POLLPRI);
-  
+
   state.changed = true;
-  
+
   UNLOCK_POLLS();
-  
+
   pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
@@ -444,7 +444,7 @@ bool sockets_remove_socket(int socket) {
   }
 
   remove_socket_at(pos);
-  
+
   state.changed = true;
 
   UNLOCK_POLLS();
