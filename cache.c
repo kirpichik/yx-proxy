@@ -105,9 +105,9 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   reader->next = entry->readers;
   entry->readers = reader;
 
-  pthread_rwlock_unlock(&entry->lock);
-
   callback(entry, arg);
+  
+  pthread_rwlock_unlock(&entry->lock);
 
   return reader;
 }
@@ -200,9 +200,9 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
     return false;
   }
 
-  pthread_rwlock_unlock(&entry->lock);
-
   readers_foreach(entry, len);
+  
+  pthread_rwlock_unlock(&entry->lock);
 
   return true;
 }
@@ -210,7 +210,15 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
 void cache_entry_mark_finished(cache_entry_t* entry) {
   if (entry != NULL) {
     entry->finished = true;
+    
+    if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
+      perror("Cannot lock cache entry in entry mark finished");
+      return;
+    }
+
     readers_foreach(entry, 0);
+
+    pthread_rwlock_unlock(&entry->lock);
   }
 }
 
@@ -223,7 +231,15 @@ void cache_entry_mark_invalid_and_finished(cache_entry_t* entry) {
   if (entry != NULL) {
     entry->invalid = true;
     entry->finished = true;
+    
+    if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
+      perror("Cannot lock cache entry in entry mark finished");
+      return;
+    }
+
     readers_foreach(entry, 0);
+
+    pthread_rwlock_unlock(&entry->lock);
   }
 }
 

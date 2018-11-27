@@ -1,5 +1,6 @@
 
 #include <stdbool.h>
+#include <pthread.h>
 
 #include "cache.h"
 #include "http-parser.h"
@@ -14,8 +15,12 @@ struct target_state;
 
 typedef struct client_state {
   int socket;
+  volatile int revents;
   http_parser parser;
   bool parse_error;
+  pthread_mutex_t lock;
+  pthread_cond_t notifier;
+  pthread_t thread;
   pstring_t url;
   bool url_dumped;
   pstring_t client_outbuff;
@@ -31,7 +36,11 @@ typedef struct client_state {
 
 typedef struct target_state {
   int socket;
+  volatile int revents;
   http_parser parser;
+  pthread_mutex_t lock;
+  pthread_cond_t notifier;
+  pthread_t thread;
   pstring_t outbuff;
   cache_entry_t* cache;
   bool message_complete;

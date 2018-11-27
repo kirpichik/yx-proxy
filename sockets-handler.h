@@ -48,6 +48,15 @@ bool sockets_enable_in_handle(int socket);
 bool sockets_enable_out_handle(int socket);
 
 /**
+ * Enable input/output handling for added socket.
+ *
+ * @param socket Required socket.
+ *
+ * @return {@code true} if handle enabled.
+ */
+bool sockets_enable_io_handle(int socket);
+
+/**
  * Disable input handling for added socket.
  *
  * @param socket Required socket.
@@ -64,6 +73,15 @@ bool sockets_cancel_in_handle(int socket);
  * @return {@code true} if handle disabled.
  */
 bool sockets_cancel_out_handle(int socket);
+
+/**
+ * Disable input/output handling for added socket.
+ *
+ * @param socket Required socket.
+ *
+ * @return {@code true} if handle disabled.
+ */
+bool sockets_cancel_io_handle(int socket);
 
 /**
  * Removes socket from processing list.

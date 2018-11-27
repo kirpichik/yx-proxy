@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -22,11 +23,13 @@ typedef struct callback {
 } callback_t;
 
 typedef struct sockets_state {
+  pthread_t main_thread;
   pthread_mutex_t lock;
   size_t polls_count;
   size_t size;
   struct pollfd* polls;
   callback_t* callbacks;
+  bool changed;
   size_t _polls_count_copy;
   size_t _size_copy;
   struct pollfd* _polls_copy;
@@ -55,6 +58,8 @@ void sockets_destroy() {
   }
 }
 
+static void empty_handler(int signal) {}
+
 /**
  * Initializes socket processing.
  *
@@ -63,7 +68,9 @@ void sockets_destroy() {
 static bool init_sockets_state(int server_socket) {
   int errno_temp;
 
+  state.main_thread = pthread_self();
   state.size = state._size_copy = POLL_PRE_SIZE;
+  state.changed = false;
 
   state.polls = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
   if (state.polls == NULL)
@@ -112,6 +119,9 @@ static bool init_sockets_state(int server_socket) {
   state.polls[0].fd = state._polls_copy[0].fd = server_socket;
   state.polls[0].events = state._polls_copy[0].events = POLLIN | POLLPRI;
 
+  // Ignore, but interrupt poll syscall
+  signal(SIGUSR2, &empty_handler);
+
   return true;
 }
 
@@ -125,9 +135,14 @@ static bool init_sockets_state(int server_socket) {
 static bool copy_state() {
   int errno_temp;
 
-  if ((errno_temp = pthread_mutex_lock(&state.lock) != 0)) {
+  if ((errno_temp = pthread_mutex_lock(&state.lock)) != 0) {
     errno = errno_temp;
     return false;
+  }
+  
+  if (!state.changed) {
+    pthread_mutex_unlock(&state.lock);
+    return true;
   }
 
   if (state._size_copy < state.size) {
@@ -157,6 +172,8 @@ static bool copy_state() {
   memcpy(state._callbacks_copy, state.callbacks,
          sizeof(callback_t) * state.polls_count);
   state._polls_count_copy = state.polls_count;
+
+  state.changed = true;
 
   if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
     errno = errno_temp;
@@ -227,7 +244,7 @@ int sockets_poll_loop(int server_socket) {
   while (1) {
     if ((count = poll(state._polls_copy, (nfds_t)state._polls_count_copy,
                       -1)) == -1) {
-      if (errno == EINTR)
+      if (errno == EINTR && copy_state())
         continue;
       break;
     }
@@ -274,8 +291,12 @@ bool sockets_add_socket(int socket,
   state.callbacks[state.polls_count].callback = callback;
   state.callbacks[state.polls_count].arg = arg;
   state.polls_count++;
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
+
+  // Do not notify about new socket, because no events set.
   return true;
 }
 
@@ -297,48 +318,107 @@ bool sockets_enable_in_handle(int socket) {
   LOCK_POLLS();
 
   ssize_t pos = find_socket(socket);
-  if (pos == -1)
+  if (pos == -1) {
+    UNLOCK_POLLS();
     return false;
+  }
 
   state.polls[pos].events |= POLLIN | POLLPRI;
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
+  
+  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 
 bool sockets_enable_out_handle(int socket) {
   LOCK_POLLS();
   ssize_t pos = find_socket(socket);
-  if (pos == -1)
+  if (pos == -1) {
+    UNLOCK_POLLS();
     return false;
+  }
 
   state.polls[pos].events |= POLLOUT;
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
+
+  pthread_kill(state.main_thread, SIGUSR2);
+  return true;
+}
+
+bool sockets_enable_io_handle(int socket) {
+  LOCK_POLLS();
+  ssize_t pos = find_socket(socket);
+  if (pos == -1) {
+    UNLOCK_POLLS();
+    return false;
+  }
+  
+  state.polls[pos].events |= POLLOUT | POLLIN | POLLPRI;
+  
+  state.changed = true;
+  
+  UNLOCK_POLLS();
+  
+  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 
 bool sockets_cancel_in_handle(int socket) {
   LOCK_POLLS();
   ssize_t pos = find_socket(socket);
-  if (pos == -1)
+  if (pos == -1) {
+    UNLOCK_POLLS();
     return false;
+  }
 
   state.polls[pos].events &= ~(POLLIN | POLLPRI);
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
+
+  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 
 bool sockets_cancel_out_handle(int socket) {
   LOCK_POLLS();
   ssize_t pos = find_socket(socket);
-  if (pos == -1)
+  if (pos == -1) {
+    UNLOCK_POLLS();
     return false;
+  }
 
   state.polls[pos].events &= ~POLLOUT;
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
+
+  pthread_kill(state.main_thread, SIGUSR2);
+  return true;
+}
+
+bool sockets_cancel_io_handle(int socket) {
+  LOCK_POLLS();
+  ssize_t pos = find_socket(socket);
+  if (pos == -1) {
+    return false;
+  }
+  
+  state.polls[pos].events &= ~(POLLOUT | POLLIN | POLLPRI);
+  
+  state.changed = true;
+  
+  UNLOCK_POLLS();
+  
+  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 
@@ -358,15 +438,20 @@ bool sockets_remove_socket(int socket) {
   LOCK_POLLS();
 
   ssize_t pos = find_socket(socket);
-  if (pos == -1)
+  if (pos == -1) {
+    UNLOCK_POLLS();
     return false;
+  }
 
   remove_socket_at(pos);
+  
+  state.changed = true;
 
   UNLOCK_POLLS();
 
   close(socket);
 
+  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 

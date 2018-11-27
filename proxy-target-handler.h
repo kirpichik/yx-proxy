@@ -7,4 +7,9 @@
  */
 void target_handler(int socket, int events, void* arg);
 
+/**
+ * Target thread routine.
+ */
+void* target_thread(void* arg);
+
 #endif

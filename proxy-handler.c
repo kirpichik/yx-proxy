@@ -17,6 +17,8 @@
 #define DEFAULT_HTTP_PORT 80
 
 void proxy_accept_client(int socket) {
+  pthread_attr_t attr;
+
   client_state_t* state = (client_state_t*)malloc(sizeof(client_state_t));
   if (state == NULL) {
     perror("Cannot allocate state for connection");
@@ -24,6 +26,31 @@ void proxy_accept_client(int socket) {
     return;
   }
   memset(state, 0, sizeof(client_state_t));
+  
+  if ((errno = pthread_mutex_init(&state->lock, NULL)) != 0) {
+    perror("Cannot create mutex for client");
+    free(state);
+    close(socket);
+    return;
+  }
+  
+  if ((errno = pthread_cond_init(&state->notifier, NULL)) != 0) {
+    perror("Cannot create condition for client");
+    pthread_mutex_destroy(&state->lock);
+    free(state);
+    close(socket);
+    return;
+  }
+  
+  if ((errno = pthread_attr_init(&attr)) != 0) {
+    perror("Cannot create client thread attrs");
+    pthread_cond_destroy(&state->notifier);
+    pthread_mutex_destroy(&state->lock);
+    free(state);
+    close(socket);
+    return;
+  }
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
   http_parser_init(&state->parser, HTTP_REQUEST);
 
@@ -35,15 +62,17 @@ void proxy_accept_client(int socket) {
   pstring_init(&state->url);
 
   state->parser.data = state;
-
-  if (!sockets_add_socket(socket, &client_handler, state)) {
-    fprintf(stderr, "Too many file descriptors.\n");
+  
+  if ((errno = pthread_create(&state->thread, &attr, &client_thread, state))) {
+    perror("Cannot create client thread");
+    sockets_remove_socket(socket);
+    pthread_attr_destroy(&attr);
+    pthread_cond_destroy(&state->notifier);
+    pthread_mutex_destroy(&state->lock);
     free(state);
     close(socket);
     return;
   }
-
-  sockets_enable_in_handle(state->socket);
 }
 
 /**
@@ -62,6 +91,7 @@ static struct in_addr* resolve_hostname(char* hostname) {
 }
 
 bool proxy_establish_connection(client_state_t* state, char* host) {
+  pthread_attr_t attr;
   struct sockaddr_in addr;
   struct in_addr* resolved;
   char* hostname = host;
@@ -82,6 +112,32 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   }
 
   memset(state->target, 0, sizeof(target_state_t));
+  
+  if ((errno = pthread_mutex_init(&state->target->lock, NULL)) != 0) {
+    perror("Cannot create mutex for target");
+    free(state->target);
+    state->target = NULL;
+    return false;
+  }
+  
+  if ((errno = pthread_cond_init(&state->target->notifier, NULL)) != 0) {
+    perror("Cannot create condition for target");
+    pthread_mutex_destroy(&state->target->lock);
+    free(state);
+    state->target = NULL;
+    return false;
+  }
+  
+  if ((errno = pthread_attr_init(&attr)) != 0) {
+    perror("Cannot create target thread attrs");
+    pthread_cond_destroy(&state->target->notifier);
+    pthread_mutex_destroy(&state->target->lock);
+    free(state);
+    state->target = NULL;
+    return false;
+  }
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  
   pstring_init(&state->target->outbuff);
   pstring_replace(&state->target->outbuff, state->target_outbuff.str,
                   state->target_outbuff.len);
@@ -93,6 +149,9 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   if (state->target->socket < 0) {
     perror("Cannot create target socket");
     pstring_free(&state->target->outbuff);
+    pthread_attr_destroy(&attr);
+    pthread_cond_destroy(&state->target->notifier);
+    pthread_mutex_destroy(&state->target->lock);
     free(state->target);
     state->target = NULL;
     return false;
@@ -106,6 +165,9 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     fprintf(stderr, "Cannot resolve hostname: %s\n", hostname);
     close(state->target->socket);
     pstring_free(&state->target->outbuff);
+    pthread_attr_destroy(&attr);
+    pthread_cond_destroy(&state->target->notifier);
+    pthread_mutex_destroy(&state->target->lock);
     free(state->target);
     state->target = NULL;
     if (hostname != host)
@@ -130,6 +192,9 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     perror("Cannot connect to target");
     close(state->target->socket);
     pstring_free(&state->target->outbuff);
+    pthread_attr_destroy(&attr);
+    pthread_cond_destroy(&state->target->notifier);
+    pthread_mutex_destroy(&state->target->lock);
     free(state->target);
     state->target = NULL;
     return false;
@@ -138,19 +203,20 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
 #ifdef _PROXY_DEBUG
   fprintf(stderr, "Connection established with %s\n", hostname);
 #endif
-
-  if (!sockets_add_socket(state->target->socket, &target_handler,
-                          state->target)) {
-    fprintf(stderr, "Too many file descriptors\n");
-    close(state->target->socket);
+  
+  if ((errno = pthread_create(&state->target->thread, &attr, &target_thread, state->target)) != 0) {
+    perror("Cannot create target thread");
+    sockets_remove_socket(state->target->socket);
     pstring_free(&state->target->outbuff);
+    pthread_attr_destroy(&attr);
+    pthread_cond_destroy(&state->target->notifier);
+    pthread_mutex_destroy(&state->target->lock);
     free(state->target);
     state->target = NULL;
     return false;
   }
 
   sockets_enable_in_handle(state->target->socket);
-  sockets_enable_out_handle(state->target->socket);
   return true;
 }
 
@@ -172,8 +238,7 @@ int send_pstring(int socket, pstring_t* buff) {
     offset += result;
   }
 
-  free(buff->str);
-  pstring_init(buff);
+  pstring_free(buff);
 
   return 0;
 }

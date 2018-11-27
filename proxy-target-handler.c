@@ -6,13 +6,14 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include "proxy-handler.h"
 #include "sockets-handler.h"
 
 #include "proxy-target-handler.h"
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 /**
  * Handles target response initial line.
@@ -74,47 +75,85 @@ static int target_input_handler(target_state_t* state) {
  * Cleanup all target data.
  */
 static void target_cleanup(target_state_t* state) {
+  pthread_mutex_unlock(&state->lock);
   sockets_remove_socket(state->socket);
   pstring_free(&state->outbuff);
+  pthread_cond_destroy(&state->notifier);
+  pthread_mutex_destroy(&state->lock);
   free(state);
+}
+
+void* target_thread(void* arg) {
+  target_state_t* state = (target_state_t*)arg;
+  int result;
+  int events;
+
+  // Block SIGUSR1
+  sigset_t signals;
+  sigemptyset(&signals);
+  sigaddset(&signals, SIGUSR2);
+  pthread_sigmask(SIG_BLOCK, &signals, NULL);
+  
+  if (!sockets_add_socket(state->socket, &target_handler, state)) {
+    target_cleanup(state);
+    return NULL;
+  }
+  sockets_enable_io_handle(state->socket);
+
+  if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
+    perror("Cannot lock target lock");
+    target_cleanup(state);
+    return NULL;
+  }
+
+  while (1) {
+    if ((errno = pthread_cond_wait(&state->notifier, &state->lock))) {
+      perror("Cannot wait target condition");
+      target_cleanup(state);
+      return NULL;
+    }
+    events = state->revents;
+    
+    // Handle output
+    if (events & POLLOUT) {
+      result = send_pstring(state->socket, &state->outbuff);
+      if (result == -1) {
+        target_cleanup(state);
+        return NULL;
+      } else if (result == 0)
+        sockets_cancel_out_handle(state->socket);
+    }
+    
+    // Handle input
+    if (events & (POLLIN | POLLPRI)) {
+      result = target_input_handler(state);
+      if (result == -1) {
+        // If parse/receive error, mark invalid and finish
+        cache_entry_mark_invalid_and_finished(state->cache);
+        target_cleanup(state);
+        return NULL;
+      } else if (result == 1 && !state->message_complete) {
+        state->message_complete = true;
+        continue;
+      }
+    }
+    
+    // Handle ending
+    if (state->message_complete) {
+      // If not OK code, mark entry as invalid
+      if (state->parser.status_code != 200)
+        cache_entry_mark_invalid_and_finished(state->cache);
+      else
+        cache_entry_mark_finished(state->cache);
+      target_cleanup(state);
+      return NULL;
+    }
+  }
 }
 
 void target_handler(int socket, int events, void* arg) {
   target_state_t* state = (target_state_t*)arg;
-  int result;
 
-  // Handle output
-  if (events & POLLOUT) {
-    result = send_pstring(socket, &state->outbuff);
-    if (result == -1) {
-      target_cleanup(state);
-      return;
-    } else if (result == 0)
-      sockets_cancel_out_handle(state->socket);
-  }
-
-  // Handle input
-  if (events & (POLLIN | POLLPRI)) {
-    result = target_input_handler(state);
-    if (result == -1) {
-      // If parse/receive error, mark invalid and finish
-      cache_entry_mark_invalid_and_finished(state->cache);
-      target_cleanup(state);
-      return;
-    } else if (result == 1 && !state->message_complete) {
-      state->message_complete = true;
-      return;
-    }
-  }
-
-  // Handle ending
-  if (state->message_complete) {
-    // If not OK code, mark entry as invalid
-    if (state->parser.status_code != 200)
-      cache_entry_mark_invalid_and_finished(state->cache);
-    else
-      cache_entry_mark_finished(state->cache);
-    target_cleanup(state);
-    return;
-  }
+  state->revents = events;
+  pthread_cond_signal(&state->notifier);
 }

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -44,8 +45,15 @@ static bool send_to_target(client_state_t* state,
   if (state->target == NULL)
     return pstring_append(&state->target_outbuff, buff, len);
 
-  if (!pstring_append(&state->target->outbuff, buff, len))
+  if ((errno = pthread_mutex_lock(&state->target->lock)) != 0) {
+    perror("Cannot lock client on target output buffer");
     return false;
+  }
+  if (!pstring_append(&state->target->outbuff, buff, len)) {
+    pthread_mutex_unlock(&state->target->lock);
+    return false;
+  }
+  pthread_mutex_unlock(&state->target->lock);
 
   // TODO - optimisation: try to send, before this
   sockets_enable_out_handle(state->target->socket);
@@ -397,6 +405,7 @@ static bool client_output_handler(client_state_t* state) {
  * Cleanup all client data.
  */
 static void client_cleanup(client_state_t* state) {
+  pthread_mutex_unlock(&state->lock);
   sockets_remove_socket(state->socket);
   cache_entry_unsubscribe(state->cache, state->reader);
   pstring_free(&state->client_outbuff);
@@ -404,30 +413,68 @@ static void client_cleanup(client_state_t* state) {
   pstring_free(&state->url);
   pstring_free(&state->header_key);
   pstring_free(&state->header_value);
+  pthread_cond_destroy(&state->notifier);
+  pthread_mutex_destroy(&state->lock);
   free(state);
+}
+
+void* client_thread(void* arg) {
+  client_state_t* state = (client_state_t*)arg;
+  int events;
+
+  // Block SIGUSR1
+  sigset_t signals;
+  sigemptyset(&signals);
+  sigaddset(&signals, SIGUSR2);
+  pthread_sigmask(SIG_BLOCK, &signals, NULL);
+  
+  if (!sockets_add_socket(state->socket, &client_handler, state)) {
+    client_cleanup(state);
+    return NULL;
+  }
+  sockets_enable_in_handle(state->socket);
+
+  if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
+    perror("Cannot lock client lock");
+    client_cleanup(state);
+    return NULL;
+  }
+
+  while (1) {
+    if ((errno = pthread_cond_wait(&state->notifier, &state->lock)) != 0) {
+      perror("Cannot wait client condition");
+      client_cleanup(state);
+      return NULL;
+    }
+    events = state->revents;
+    
+    // Handle output
+    if (events & POLLOUT) {
+      if (!client_output_handler(state)) {
+        client_cleanup(state);
+        return NULL;
+      }
+    }
+    
+    // Handle input
+    if (events & (POLLIN | POLLPRI)) {
+      if (!client_input_handler(state)) {
+        client_cleanup(state);
+        return NULL;
+      }
+    }
+    
+    // Handle hup
+    if (events & POLLHUP) {
+      client_cleanup(state);
+      return NULL;
+    }
+  }
 }
 
 void client_handler(int socket, int events, void* arg) {
   client_state_t* state = (client_state_t*)arg;
 
-  // Handle output
-  if (events & POLLOUT) {
-    if (!client_output_handler(state)) {
-      client_cleanup(state);
-      return;
-    }
-  }
-
-  // Handle input
-  if (events & (POLLIN | POLLPRI)) {
-    if (!client_input_handler(state)) {
-      client_cleanup(state);
-      return;
-    }
-  }
-
-  // Handle hup
-  if (events & POLLHUP) {
-    client_cleanup(state);
-  }
+  state->revents = events;
+  pthread_cond_signal(&state->notifier);
 }
