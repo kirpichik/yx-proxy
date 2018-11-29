@@ -21,6 +21,7 @@
 #define HEADER_CONNECTION_CLOSE "close"
 #define PROTOCOL_VERSION_STR "HTTP/1.0"
 #define LINE_DELIM "\r\n"
+#define URL_PREFIX "http://"
 
 #define DEF_LEN(str) (sizeof(str) - 1)
 
@@ -151,14 +152,32 @@ static void accept_cache_updates(cache_entry_t* entry, void* arg) {
     sockets_enable_out_handle(state->socket);
 }
 
+static char* form_entry_name(client_state_t* state, char* host) {
+  if (state->url.str[0] == '/') {
+    size_t host_len = strlen(host);
+    size_t len = DEF_LEN(URL_PREFIX) + host_len + state->url.len;
+    char* res = (char*)malloc(len + 1);
+    memcpy(res, URL_PREFIX, DEF_LEN(URL_PREFIX));
+    memcpy(res + DEF_LEN(URL_PREFIX), host, host_len);
+    memcpy(res + DEF_LEN(URL_PREFIX) + host_len, state->url.str, state->url.len);
+    res[len] = '\0';
+    
+    return res;
+  }
+  
+  return state->url.str;
+}
+
 /**
  * Searches for cache entry with required URL.
  * If cache entry found, use it.
  * If cache entry not found, creates connection and use it.
  */
 static bool establish_cached_connection(client_state_t* state, char* host) {
-  // FIXME - form url from state->url and host
-  int result = cache_find_or_create(state->url.str, &state->cache);
+  char* entry_name = form_entry_name(state, host);
+  int result = cache_find_or_create(entry_name, &state->cache);
+  if (entry_name != state->url.str)
+    free(entry_name);
   if (result == -1)
     return false;
 
