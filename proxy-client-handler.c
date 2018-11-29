@@ -168,7 +168,11 @@ static bool establish_cached_connection(client_state_t* state, char* host) {
 
   if (result == 1) {
     state->use_cache = false;
-    return proxy_establish_connection(state, host);
+    if (!proxy_establish_connection(state, host)) {
+      cache_entry_mark_invalid_and_finished(state->cache);
+      return false;
+    }
+    return true;
   }
 
   return true;
