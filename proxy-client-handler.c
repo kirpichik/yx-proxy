@@ -132,11 +132,6 @@ static bool dump_initial_line(client_state_t* state) {
   output[len - 2] = '\r';
   output[len - 1] = '\n';
 
-#ifdef _PROXY_DEBUG
-  output[len] = '\0';
-  fprintf(stderr, "Dump initial line: \"%s\"\n", output);
-#endif
-
   bool result = send_to_target(state, output, len);
   free(output);
 
@@ -191,9 +186,15 @@ static bool establish_cached_connection(client_state_t* state, char* host) {
       cache_entry_mark_invalid_and_finished(state->cache);
       return false;
     }
+#ifdef _PROXY_DEBUG
+    fprintf(stderr, "Proxy data to %s, URL: %s\n", host, state->url.str);
+#endif
     return true;
   }
 
+#ifdef _PROXY_DEBUG
+  fprintf(stderr, "Use cache to %s, URL: %s\n", host, state->url.str);
+#endif
   return true;
 }
 

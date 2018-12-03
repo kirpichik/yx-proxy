@@ -15,6 +15,7 @@
 #include "proxy-handler.h"
 
 #define DEFAULT_HTTP_PORT 80
+#define BLOCKED_TLS_PORT "443"
 
 void proxy_accept_client(int socket) {
   client_state_t* state = (client_state_t*)calloc(1, sizeof(client_state_t));
@@ -56,6 +57,15 @@ static int connect_target(char* host) {
     memcpy(hostname, host, (size_t)(split_pos - host));
     hostname[split_pos - host] = '\0';
     port = host + (split_pos - host) + 1;
+  }
+  
+  if (!strncmp(port, BLOCKED_TLS_PORT, sizeof(BLOCKED_TLS_PORT) - 1)) {
+#ifdef _PROXY_DEBUG
+    fprintf(stderr, "Ignore TLS connection to %s\n", host);
+#endif
+    if (hostname != host)
+      free(hostname);
+    return -1;
   }
   
 #ifdef _PROXY_DEBUG
