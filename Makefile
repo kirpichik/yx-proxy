@@ -16,7 +16,8 @@ SOURCES=main.c\
 				proxy-handler.c\
 				proxy-client-handler.c\
 				proxy-target-handler.c\
-				http-parser.c
+				http-parser.c\
+				proxy-utils.c
 HEADERS=sockets-handler.h\
 				pstring.h\
 				cache.h\
