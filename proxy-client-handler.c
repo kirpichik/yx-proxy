@@ -154,8 +154,19 @@ static bool dump_initial_line(client_state_t* state) {
  */
 static void accept_cache_updates(cache_entry_t* entry, void* arg) {
   client_state_t* state = (client_state_t*)arg;
-  if (entry->data.str != NULL)
+  int error;
+
+  if (entry->data.str != NULL) {
+    error = pthread_mutex_lock(&state->lock);
+    if (error) {
+      proxy_error(error, "Cannot lock on client lock in cache accept");
+      return;
+    }
+
     sockets_enable_out_handle(state->socket);
+
+    pthread_mutex_unlock(&state->lock);
+  }
 }
 
 static char* form_entry_name(client_state_t* state, char* host) {
@@ -403,6 +414,10 @@ static bool client_input_handler(client_state_t* state) {
  */
 static bool client_output_handler(client_state_t* state) {
   char buff[BUFFER_SIZE];
+
+  if (state->cache == NULL)
+    return true;
+
   ssize_t len =
       cache_entry_extract(state->cache, state->cache_offset, buff, BUFFER_SIZE);
   if (len == -1)
@@ -453,7 +468,7 @@ static bool client_init(client_state_t* state) {
     client_cleanup(state);
     return false;
   }
-  sockets_enable_in_handle(state->socket);
+  sockets_enable_io_handle(state->socket);
 
   error = pthread_mutex_lock(&state->lock);
   if (error) {
