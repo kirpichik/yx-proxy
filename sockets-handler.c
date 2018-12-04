@@ -128,6 +128,7 @@ bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
                         void* arg) {
   if (state.polls_count + 1 >= state.size) {
+    size_t size = state.size * POLL_GROW_SPEED;
     struct pollfd* temp_polls =
         (struct pollfd*)realloc(state.polls, size * sizeof(struct pollfd));
     if (temp_polls == NULL) {
