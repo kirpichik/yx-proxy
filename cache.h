@@ -34,9 +34,9 @@ typedef struct cache {
 /**
  * Init cache.
  *
- * @return {@code true} if success.
+ * @return {@code 0} if success.
  */
-bool cache_init(void);
+int cache_init(void);
 
 /**
  * Finds stored cache entry or creates new, if not exists.

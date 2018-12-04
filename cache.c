@@ -1,25 +1,29 @@
 
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "proxy-utils.h"
 
 #include "cache.h"
 
 static cache_t cache;
 
-bool cache_init(void) {
+int cache_init(void) {
   cache.list = NULL;
-  return (errno = pthread_mutex_init(&cache.global_lock, NULL)) == 0;
+  return pthread_mutex_init(&cache.global_lock, NULL);
 }
 
 int cache_find_or_create(char* url, cache_entry_t** result) {
+  int error;
+
   if (url == NULL)
     return -1;
 
-  if ((errno = pthread_mutex_lock(&cache.global_lock)) != 0) {
-    perror("Cannot lock global cache");
-    return -1;
+  error = pthread_mutex_lock(&cache.global_lock);
+  if (error) {
+    proxy_error(error, "Cannot lock global cache");
+    return error;
   }
 
   cache_entry_t* entry = cache.list;
@@ -57,8 +61,9 @@ int cache_find_or_create(char* url, cache_entry_t** result) {
   }
 
   memset(entry, 0, sizeof(cache_entry_t));
-  if ((errno = pthread_rwlock_init(&entry->lock, NULL)) != 0) {
-    perror("Cannot init rw lock for cache entry");
+  error = pthread_rwlock_init(&entry->lock, NULL);
+  if (error) {
+    proxy_error(error, "Cannot init rw lock for cache entry");
     free(entry);
     pthread_mutex_unlock(&cache.global_lock);
     return -1;
@@ -85,6 +90,8 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
                                             void (*callback)(cache_entry_t*,
                                                              void*),
                                             void* arg) {
+  int error;
+
   if (entry == NULL || callback == NULL)
     return NULL;
 
@@ -97,8 +104,9 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
   reader->callback = callback;
   reader->arg = arg;
 
-  if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
-    perror("Cannot subscribe cache entry reader");
+  error = pthread_rwlock_wrlock(&entry->lock);
+  if (error) {
+    proxy_error(error, "Cannot subscribe cache entry reader");
     free(reader);
     return NULL;
   }
@@ -116,11 +124,14 @@ cache_entry_reader_t* cache_entry_subscribe(cache_entry_t* entry,
 bool cache_entry_unsubscribe(cache_entry_t* entry,
                              cache_entry_reader_t* reader) {
   cache_entry_reader_t* curr;
+  int error;
+
   if (entry == NULL || reader == NULL)
     return false;
 
-  if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
-    perror("Cannot unsubscribe cache entry reader");
+  error = pthread_rwlock_wrlock(&entry->lock);
+  if (error) {
+    proxy_error(error, "Cannot unsubscribe cache entry reader");
     return false;
   }
 
@@ -151,11 +162,14 @@ ssize_t cache_entry_extract(cache_entry_t* entry,
                             size_t offset,
                             char* buffer,
                             size_t len) {
+  int error;
+
   if (entry == NULL || buffer == NULL)
     return -1;
 
-  if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
-    perror("Cannot use read lock for cache entry");
+  error = pthread_rwlock_rdlock(&entry->lock);
+  if (error) {
+    proxy_error(error, "Cannot use read lock for cache entry");
     return -1;
   }
 
@@ -187,11 +201,14 @@ static void readers_foreach(cache_entry_t* entry, size_t len) {
 }
 
 bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
+  int error;
+
   if (entry == NULL || data == NULL)
     return false;
 
-  if ((errno = pthread_rwlock_wrlock(&entry->lock)) != 0) {
-    perror("Cannot lock cache entry in entry append");
+  error = pthread_rwlock_wrlock(&entry->lock);
+  if (error) {
+    proxy_error(error, "Cannot lock cache entry in entry append");
     return false;
   }
 
@@ -209,11 +226,14 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
 }
 
 void cache_entry_mark_finished(cache_entry_t* entry) {
+  int error;
+
   if (entry != NULL) {
     entry->finished = true;
 
-    if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
-      perror("Cannot lock cache entry in entry mark finished");
+    error = pthread_rwlock_rdlock(&entry->lock);
+    if (error) {
+      proxy_error(error, "Cannot lock cache entry in entry mark finished");
       return;
     }
 
@@ -229,12 +249,15 @@ void cache_entry_mark_invalid(cache_entry_t* entry) {
 }
 
 void cache_entry_mark_invalid_and_finished(cache_entry_t* entry) {
+  int error;
+
   if (entry != NULL) {
     entry->invalid = true;
     entry->finished = true;
 
-    if ((errno = pthread_rwlock_rdlock(&entry->lock)) != 0) {
-      perror("Cannot lock cache entry in entry mark finished");
+    error = pthread_rwlock_rdlock(&entry->lock);
+    if (error) {
+      proxy_error(error, "Cannot lock cache entry in entry mark finished");
       return;
     }
 

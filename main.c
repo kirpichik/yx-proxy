@@ -1,11 +1,12 @@
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <signal.h>
 
 #include "cache.h"
+#include "proxy-utils.h"
 #include "sockets-handler.h"
 
 static void interrupt_handler(int signal) {
@@ -18,6 +19,7 @@ static void interrupt_handler(int signal) {
 int main(int argc, char* argv[]) {
   struct sockaddr_in addr;
   int server_socket;
+  int result;
   int port;
 
   if (argc != 2) {
@@ -44,7 +46,11 @@ int main(int argc, char* argv[]) {
 
   fprintf(stderr, "Server socket bound.\n");
 
-  cache_init();
+  result = cache_init();
+  if (result) {
+    proxy_error(result, "Cannot init cache");
+    return -1;
+  }
 
   signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, &interrupt_handler);

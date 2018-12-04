@@ -10,12 +10,14 @@
 
 #include "proxy-client-handler.h"
 #include "proxy-target-handler.h"
+#include "proxy-utils.h"
 #include "sockets-handler.h"
 
 #include "proxy-handler.h"
 
 void proxy_accept_client(int socket) {
   pthread_attr_t attr;
+  int error;
 
   client_state_t* state = (client_state_t*)calloc(1, sizeof(client_state_t));
   if (state == NULL) {
@@ -23,18 +25,21 @@ void proxy_accept_client(int socket) {
     goto error_malloc;
   }
 
-  if ((errno = pthread_mutex_init(&state->lock, NULL)) != 0) {
-    perror("Cannot create mutex for client");
+  error = pthread_mutex_init(&state->lock, NULL);
+  if (error) {
+    proxy_error(error, "Cannot create mutex for client");
     goto error_mutex;
   }
 
-  if ((errno = pthread_cond_init(&state->notifier, NULL)) != 0) {
-    perror("Cannot create condition for client");
+  error = pthread_cond_init(&state->notifier, NULL);
+  if (error) {
+    proxy_error(error, "Cannot create condition for client");
     goto error_cond;
   }
 
-  if ((errno = pthread_attr_init(&attr)) != 0) {
-    perror("Cannot create client thread attrs");
+  error = pthread_attr_init(&attr);
+  if (error) {
+    proxy_error(error, "Cannot create client thread attrs");
     goto error_attr;
   }
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -43,8 +48,9 @@ void proxy_accept_client(int socket) {
   http_parser_init(&state->parser, HTTP_REQUEST);
   state->parser.data = state;
 
-  if ((errno = pthread_create(&state->thread, &attr, &client_thread, state))) {
-    perror("Cannot create client thread");
+  error = pthread_create(&state->thread, &attr, &client_thread, state);
+  if (error) {
+    proxy_error(error, "Cannot create client thread");
     goto error_thread;
   }
 
@@ -75,9 +81,7 @@ static int connect_target(char* host) {
     port = host + (split_pos - host) + 1;
   }
 
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Connecting to %s...\n", host);
-#endif
+  proxy_log("Connecting to %s...", host);
 
   memset(&hints, 0, sizeof(struct addrinfo));
   hints.ai_family = PF_UNSPEC;
@@ -103,9 +107,7 @@ static int connect_target(char* host) {
     goto cleanup;
   }
 
-#ifdef _PROXY_DEBUG
-  fprintf(stderr, "Connected to %s\n", host);
-#endif
+  proxy_log("Connected to %s with socket %d", host, sock);
 
 cleanup:
   if (hostname != host)
@@ -116,6 +118,7 @@ cleanup:
 
 bool proxy_establish_connection(client_state_t* state, char* host) {
   pthread_attr_t attr;
+  int error;
 
   state->target = (target_state_t*)calloc(1, sizeof(target_state_t));
   if (state->target == NULL) {
@@ -123,18 +126,21 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
     return false;
   }
 
-  if ((errno = pthread_mutex_init(&state->target->lock, NULL)) != 0) {
-    perror("Cannot create mutex for target");
+  error = pthread_mutex_init(&state->target->lock, NULL);
+  if (error) {
+    proxy_error(error, "Cannot create mutex for target");
     goto error_mutex;
   }
 
-  if ((errno = pthread_cond_init(&state->target->notifier, NULL)) != 0) {
-    perror("Cannot create condition for target");
+  error = pthread_cond_init(&state->target->notifier, NULL);
+  if (error) {
+    proxy_error(error, "Cannot create condition for target");
     goto error_cond;
   }
 
-  if ((errno = pthread_attr_init(&attr)) != 0) {
-    perror("Cannot create target thread attrs");
+  error = pthread_attr_init(&attr);
+  if (error) {
+    proxy_error(error, "Cannot create target thread attrs");
     goto error_attr;
   }
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -149,9 +155,10 @@ bool proxy_establish_connection(client_state_t* state, char* host) {
   if ((state->target->socket = connect_target(host)) < 0)
     goto error_socket;
 
-  if ((errno = pthread_create(&state->target->thread, &attr, &target_thread,
-                              state->target)) != 0) {
-    perror("Cannot create target thread");
+  error = pthread_create(&state->target->thread, &attr, &target_thread,
+                         state->target);
+  if (error) {
+    proxy_error(error, "Cannot create target thread");
     goto error_socket;
   }
 

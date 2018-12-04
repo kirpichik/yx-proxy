@@ -78,8 +78,8 @@ static void empty_handler(int signal) {}
  *
  * @param server_socket Socket for receiving new clients.
  */
-static bool init_sockets_state(int server_socket) {
-  int errno_temp;
+static int init_sockets_state(int server_socket) {
+  int error;
 
   state.main_thread = pthread_self();
   state.size = state._size_copy = POLL_PRE_SIZE;
@@ -87,13 +87,12 @@ static bool init_sockets_state(int server_socket) {
 
   state.polls = (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
   if (state.polls == NULL)
-    return false;
+    return errno;
   state.callbacks = (callback_t*)malloc(sizeof(callback_t) * state.size);
   if (state.callbacks == NULL) {
-    errno_temp = errno;
+    error = errno;
     free(state.polls);
-    errno = errno_temp;
-    return false;
+    return error;
   }
   memset(state.polls, 0, sizeof(struct pollfd) * state.size);
   memset(state.callbacks, 0, sizeof(callback_t) * state.size);
@@ -101,31 +100,28 @@ static bool init_sockets_state(int server_socket) {
   state._polls_copy =
       (struct pollfd*)malloc(sizeof(struct pollfd) * state.size);
   if (state._polls_copy == NULL) {
-    errno_temp = errno;
+    error = errno;
     free(state.callbacks);
     free(state.polls);
-    errno = errno_temp;
-    return false;
+    return error;
   }
   state._callbacks_copy = (callback_t*)malloc(sizeof(callback_t) * state.size);
   if (state._callbacks_copy == NULL) {
-    errno_temp = errno;
+    error = errno;
     free(state._polls_copy);
     free(state.callbacks);
     free(state.polls);
-    errno = errno_temp;
-    return false;
+    return error;
   }
   memset(state._polls_copy, 0, sizeof(struct pollfd) * state.size);
   memset(state._callbacks_copy, 0, sizeof(callback_t) * state.size);
 
-  if ((errno_temp = pthread_mutex_init(&state.lock, NULL)) != 0) {
+  if ((error = pthread_mutex_init(&state.lock, NULL)) != 0) {
     free(state._callbacks_copy);
     free(state._polls_copy);
     free(state.callbacks);
     free(state.polls);
-    errno = errno_temp;
-    return false;
+    return error;
   }
 
   state.polls_count = state._polls_count_copy = 1;
@@ -135,7 +131,7 @@ static bool init_sockets_state(int server_socket) {
   // Ignore, but interrupt poll syscall
   signal(SIGUSR2, &empty_handler);
 
-  return true;
+  return 0;
 }
 
 /**
@@ -212,7 +208,7 @@ static bool handle_polls_update(size_t count) {
       if (revents & POLLPRI || revents & POLLIN) {
         socket = accept(state._polls_copy[0].fd, NULL, NULL);
         fcntl(socket, F_SETFL, O_NONBLOCK);
-        PROXY_DEBUG("Accept new client socket.");
+        proxy_log("Accept new client socket: %d", socket);
         proxy_accept_client(socket);
       } else {
         fprintf(stderr, "Cannot accept new clients\n");
@@ -231,11 +227,11 @@ static bool handle_polls_update(size_t count) {
 }
 
 int sockets_poll_loop(int server_socket) {
-  int count;
-  int errno_temp;
+  int count, error;
 
-  if (!init_sockets_state(server_socket)) {
-    perror("Cannot init sockets state");
+  error = init_sockets_state(server_socket);
+  if (error) {
+    proxy_error(error, "Cannot init sockets state");
     return -1;
   }
 
@@ -250,10 +246,9 @@ int sockets_poll_loop(int server_socket) {
       break;
     }
 
-    if ((errno_temp = pthread_mutex_lock(&state.lock)) != 0) {
-      errno = errno_temp;
+    error = pthread_mutex_lock(&state.lock);
+    if (error)
       break;
-    }
 
     if (!handle_polls_update(count)) {
       pthread_mutex_unlock(&state.lock);
@@ -265,27 +260,25 @@ int sockets_poll_loop(int server_socket) {
       break;
     }
 
-    if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
-      errno = errno_temp;
+    error = pthread_mutex_unlock(&state.lock);
+    if (error)
       break;
-    }
   }
 
-  perror("Cannot handle sockets");
+  proxy_error(error, "Cannot handle sockets");
   return -1;
 }
 
-#define LOCK_POLLS()                                    \
-  if ((errno = pthread_mutex_lock(&state.lock) != 0)) { \
-    perror("Cannot lock sockets state");                \
-    return false;                                       \
+#define LOCK_POLLS()                                   \
+  {                                                    \
+    int error = pthread_mutex_lock(&state.lock);       \
+    if (error) {                                       \
+      proxy_error(error, "Cannot lock sockets state"); \
+      return false;                                    \
+    }                                                  \
   }
 
-#define UNLOCK_POLLS()                                    \
-  if ((errno = pthread_mutex_unlock(&state.lock) != 0)) { \
-    perror("Cannot unlock sockets state");                \
-    return false;                                         \
-  }
+#define UNLOCK_POLLS() pthread_mutex_unlock(&state.lock);
 
 bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),

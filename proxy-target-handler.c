@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "proxy-handler.h"
+#include "proxy-utils.h"
 #include "sockets-handler.h"
 
 #include "proxy-target-handler.h"
@@ -86,6 +87,8 @@ static void target_cleanup(target_state_t* state) {
 }
 
 static bool target_init(target_state_t* state) {
+  int error;
+
   // Block SIGUSR2
   sigset_t signals;
   sigemptyset(&signals);
@@ -93,13 +96,16 @@ static bool target_init(target_state_t* state) {
   pthread_sigmask(SIG_BLOCK, &signals, NULL);
 
   if (!sockets_add_socket(state->socket, &target_handler, state)) {
+    cache_entry_mark_invalid_and_finished(state->cache);
     target_cleanup(state);
     return false;
   }
   sockets_enable_io_handle(state->socket);
 
-  if ((errno = pthread_mutex_lock(&state->lock)) != 0) {
-    perror("Cannot lock target lock");
+  error = pthread_mutex_lock(&state->lock);
+  if (error) {
+    proxy_error(error, "Cannot lock target lock");
+    cache_entry_mark_invalid_and_finished(state->cache);
     target_cleanup(state);
     return false;
   }
@@ -109,15 +115,16 @@ static bool target_init(target_state_t* state) {
 
 void* target_thread(void* arg) {
   target_state_t* state = (target_state_t*)arg;
-  int result;
-  int events;
+  int result, events, error;
 
   if (!target_init(state))
     return NULL;
 
   while (1) {
-    if ((errno = pthread_cond_wait(&state->notifier, &state->lock))) {
-      perror("Cannot wait target condition");
+    error = pthread_cond_wait(&state->notifier, &state->lock);
+    if (error) {
+      proxy_error(error, "Cannot wait target condition");
+      cache_entry_mark_invalid_and_finished(state->cache);
       target_cleanup(state);
       return NULL;
     }
@@ -127,6 +134,7 @@ void* target_thread(void* arg) {
     if (events & POLLOUT) {
       result = send_pstring(state->socket, &state->outbuff);
       if (result == -1) {
+        cache_entry_mark_invalid_and_finished(state->cache);
         target_cleanup(state);
         return NULL;
       } else if (result == 0)
