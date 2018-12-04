@@ -56,6 +56,19 @@ void sockets_destroy() {
     else
       cb->callback(state.polls[1].fd, POLLHUP, cb->arg);
   }
+
+  while (state._polls_count_copy-- > 1) {
+    callback_t* cb = &state._callbacks_copy[1];
+    if (cb->callback == NULL)  // For server socket
+      close(state._polls_copy[1].fd);
+    else
+      cb->callback(state._polls_copy[1].fd, POLLHUP, cb->arg);
+  }
+
+  free(state.polls);
+  free(state._polls_copy);
+  free(state.callbacks);
+  free(state._callbacks_copy);
 }
 
 static void empty_handler(int signal) {}
@@ -277,8 +290,22 @@ bool sockets_add_socket(int socket,
 
   if (state.polls_count + 1 >= state.size) {
     size_t size = state.size * POLL_GROW_SPEED;
-    state.polls = (struct pollfd*)realloc(state.polls, size);
-    state.callbacks = (callback_t*)realloc(state.callbacks, size);
+    struct pollfd* temp_polls =
+        (struct pollfd*)realloc(state.polls, size * sizeof(struct pollfd));
+    if (temp_polls == NULL) {
+      perror("Cannot increase sockets poll size");
+      return false;
+    }
+    state.polls = temp_polls;
+
+    callback_t* temp_callbacks =
+        (callback_t*)realloc(state.callbacks, size * sizeof(callback_t));
+    if (temp_callbacks == NULL) {
+      perror("Cannot increase sockets callbacks size");
+      return false;
+    }
+    state.callbacks = temp_callbacks;
+
     memset(state.polls + state.size, 0, size - state.size);
     memset(state.callbacks + state.size, 0, size - state.size);
     state.size = size;
@@ -435,6 +462,9 @@ static void remove_socket_at(size_t pos) {
 bool sockets_remove_socket(int socket) {
   LOCK_POLLS();
 
+  // Pre kill for closing sockets
+  pthread_kill(state.main_thread, SIGUSR2);
+
   ssize_t pos = find_socket(socket);
   if (pos == -1) {
     UNLOCK_POLLS();
@@ -449,7 +479,6 @@ bool sockets_remove_socket(int socket) {
 
   close(socket);
 
-  pthread_kill(state.main_thread, SIGUSR2);
   return true;
 }
 
