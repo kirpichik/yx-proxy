@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <signal.h>
 
 #include "cache.h"
 #include "sockets-handler.h"
