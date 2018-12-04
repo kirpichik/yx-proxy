@@ -48,6 +48,9 @@ void sockets_destroy() {
     else
       cb->callback(state.polls[1].fd, POLLHUP, cb->arg);
   }
+
+  free(state.polls);
+  free(state.callbacks);
 }
 
 /**
