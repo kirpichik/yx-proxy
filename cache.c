@@ -223,9 +223,9 @@ bool cache_entry_append(cache_entry_t* entry, const char* data, size_t len) {
     return false;
   }
 
-  pthread_rwlock_unlock(&entry->lock);
-
   readers_foreach(entry, len);
+
+  pthread_rwlock_unlock(&entry->lock);
 
   return true;
 }
@@ -242,9 +242,9 @@ void cache_entry_mark_finished(cache_entry_t* entry) {
       return;
     }
 
-    pthread_rwlock_unlock(&entry->lock);
-
     readers_foreach(entry, 0);
+
+    pthread_rwlock_unlock(&entry->lock);
   }
 }
 
@@ -266,9 +266,9 @@ void cache_entry_mark_invalid_and_finished(cache_entry_t* entry) {
       return;
     }
 
-    pthread_rwlock_unlock(&entry->lock);
-
     readers_foreach(entry, 0);
+
+    pthread_rwlock_unlock(&entry->lock);
   }
 }
 

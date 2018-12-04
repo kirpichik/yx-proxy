@@ -16,6 +16,7 @@ struct target_state;
 typedef struct client_state {
   int socket;
   volatile int revents;
+  volatile bool cache_updates;
   http_parser parser;
   bool parse_error;
   pthread_mutex_t lock;

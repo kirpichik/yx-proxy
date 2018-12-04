@@ -154,18 +154,10 @@ static bool dump_initial_line(client_state_t* state) {
  */
 static void accept_cache_updates(cache_entry_t* entry, void* arg) {
   client_state_t* state = (client_state_t*)arg;
-  int error;
 
   if (entry->data.str != NULL) {
-    error = pthread_mutex_lock(&state->lock);
-    if (error) {
-      proxy_error(error, "Cannot lock on client lock in cache accept");
-      return;
-    }
-
+    state->cache_updates = true;
     sockets_enable_out_handle(state->socket);
-
-    pthread_mutex_unlock(&state->lock);
   }
 }
 
@@ -426,7 +418,8 @@ static bool client_output_handler(client_state_t* state) {
   if (len == 0) {
     if (state->cache->finished)
       return false;
-    sockets_cancel_out_handle(state->socket);
+    if (!state->cache_updates)
+      sockets_cancel_out_handle(state->socket);
     return true;
   }
 
