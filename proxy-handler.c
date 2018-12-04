@@ -15,6 +15,8 @@
 
 #include "proxy-handler.h"
 
+#define BLOCKED_TLS_PORT "443"
+
 void proxy_accept_client(int socket) {
   pthread_attr_t attr;
   int error;
@@ -81,6 +83,13 @@ static int connect_target(char* host) {
     port = host + (split_pos - host) + 1;
   }
 
+  if (!strncmp(port, BLOCKED_TLS_PORT, sizeof(BLOCKED_TLS_PORT) - 1)) {
+    proxy_log("Ignore TLS connection to %s\n", host);
+    if (hostname != host)
+      free(hostname);
+    return -1;
+  }
+
   proxy_log("Connecting to %s...", host);
 
   memset(&hints, 0, sizeof(struct addrinfo));
@@ -88,7 +97,7 @@ static int connect_target(char* host) {
   hints.ai_socktype = SOCK_STREAM;
   int error = getaddrinfo(hostname, port, &hints, &result);
   if (error) {
-    fprintf(stderr, "Cannot resolve %s: %s", host, gai_strerror(error));
+    fprintf(stderr, "Cannot resolve %s: %s\n", host, gai_strerror(error));
     if (hostname != host)
       free(hostname);
     return -1;
