@@ -146,13 +146,6 @@ static bool init_sockets_state(int server_socket) {
  * @return {@code true} if success, or {@code false} and sets errno value.
  */
 static bool copy_state() {
-  int errno_temp;
-
-  if ((errno_temp = pthread_mutex_lock(&state.lock)) != 0) {
-    errno = errno_temp;
-    return false;
-  }
-
   if (!state.changed) {
     pthread_mutex_unlock(&state.lock);
     return true;
@@ -187,11 +180,6 @@ static bool copy_state() {
   state._polls_count_copy = state.polls_count;
 
   state.changed = true;
-
-  if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
-    errno = errno_temp;
-    return false;
-  }
 
   return true;
 }
@@ -235,7 +223,8 @@ static bool handle_polls_update(size_t count) {
     }
 
     callback_t* cb = &state._callbacks_copy[i];
-    cb->callback(state._polls_copy[i].fd, revents, cb->arg);
+    if (cb->arg == state.callbacks[i].arg)  // Skip moved connections
+      cb->callback(state._polls_copy[i].fd, revents, cb->arg);
   }
 
   return true;
@@ -243,6 +232,7 @@ static bool handle_polls_update(size_t count) {
 
 int sockets_poll_loop(int server_socket) {
   int count;
+  int errno_temp;
 
   if (!init_sockets_state(server_socket)) {
     perror("Cannot init sockets state");
@@ -260,11 +250,25 @@ int sockets_poll_loop(int server_socket) {
       break;
     }
 
-    if (!handle_polls_update(count))
-      return 1;
-
-    if (!copy_state())
+    if ((errno_temp = pthread_mutex_lock(&state.lock)) != 0) {
+      errno = errno_temp;
       break;
+    }
+
+    if (!handle_polls_update(count)) {
+      pthread_mutex_unlock(&state.lock);
+      return 1;
+    }
+
+    if (!copy_state()) {
+      pthread_mutex_unlock(&state.lock);
+      break;
+    }
+
+    if ((errno_temp = pthread_mutex_unlock(&state.lock)) != 0) {
+      errno = errno_temp;
+      break;
+    }
   }
 
   perror("Cannot handle sockets");
