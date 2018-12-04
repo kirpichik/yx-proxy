@@ -128,11 +128,22 @@ bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
                         void* arg) {
   if (state.polls_count + 1 >= state.size) {
-    size_t size = state.size * POLL_GROW_SPEED;
-    state.polls =
+    struct pollfd* temp_polls =
         (struct pollfd*)realloc(state.polls, size * sizeof(struct pollfd));
-    state.callbacks =
+    if (temp_polls == NULL) {
+      perror("Cannot increase sockets poll size");
+      return false;
+    }
+    state.polls = temp_polls;
+
+    callback_t* temp_callbacks =
         (callback_t*)realloc(state.callbacks, size * sizeof(callback_t));
+    if (temp_callbacks == NULL) {
+      perror("Cannot increase sockets callbacks size");
+      return false;
+    }
+    state.callbacks = temp_callbacks;
+
     memset(state.polls + state.size, 0, size - state.size);
     memset(state.callbacks + state.size, 0, size - state.size);
     state.size = size;
