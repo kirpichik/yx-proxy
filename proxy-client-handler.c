@@ -1,6 +1,5 @@
 
 #include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -450,12 +449,6 @@ static void client_cleanup(client_state_t* state) {
 
 static bool client_init(client_state_t* state) {
   int error;
-
-  // Block SIGUSR2
-  sigset_t signals;
-  sigemptyset(&signals);
-  sigaddset(&signals, SIGUSR2);
-  pthread_sigmask(SIG_BLOCK, &signals, NULL);
 
   if (!sockets_add_socket(state->socket, &client_handler, state)) {
     client_cleanup(state);

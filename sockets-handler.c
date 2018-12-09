@@ -2,7 +2,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +15,7 @@
 
 #define POLL_PRE_SIZE 50
 #define POLL_GROW_SPEED 2
+#define BUFFER_SIZE 128
 
 typedef struct callback {
   void (*callback)(int, int, void*);
@@ -23,7 +23,7 @@ typedef struct callback {
 } callback_t;
 
 typedef struct sockets_state {
-  pthread_t main_thread;
+  int signal_pipe;
   pthread_mutex_t lock;
   size_t polls_count;
   size_t size;
@@ -47,31 +47,29 @@ static void remove_socket_at(size_t);
 static sockets_state_t state;
 
 void sockets_destroy() {
-  close(state.polls[0].fd);
-
   while (state.polls_count-- > 1) {
-    callback_t* cb = &state.callbacks[1];
-    if (cb->callback == NULL)  // For server socket
-      close(state.polls[1].fd);
+    callback_t* cb = &state.callbacks[state.polls_count];
+    if (cb->callback == NULL)  // For server socket or signal pipe
+      close(state.polls[state.polls_count].fd);
     else
-      cb->callback(state.polls[1].fd, POLLHUP, cb->arg);
+      cb->callback(state.polls[state.polls_count].fd, POLLHUP, cb->arg);
   }
 
   while (state._polls_count_copy-- > 1) {
-    callback_t* cb = &state._callbacks_copy[1];
-    if (cb->callback == NULL)  // For server socket
-      close(state._polls_copy[1].fd);
+    callback_t* cb = &state._callbacks_copy[state._polls_count_copy];
+    if (cb->callback == NULL)  // For server socket or signal pipe
+      close(state._polls_copy[state._polls_count_copy].fd);
     else
-      cb->callback(state._polls_copy[1].fd, POLLHUP, cb->arg);
+      cb->callback(state._polls_copy[state._polls_count_copy].fd, POLLHUP,
+                   cb->arg);
   }
 
+  close(state.signal_pipe);
   free(state.polls);
   free(state._polls_copy);
   free(state.callbacks);
   free(state._callbacks_copy);
 }
-
-static void empty_handler(int signal) {}
 
 /**
  * Initializes socket processing.
@@ -80,8 +78,14 @@ static void empty_handler(int signal) {}
  */
 static int init_sockets_state(int server_socket) {
   int error;
+  int pipes[2];
 
-  state.main_thread = pthread_self();
+  if (pipe(pipes)) {
+    perror("Cannot create signal pipe");
+    return errno;
+  }
+  state.signal_pipe = pipes[1];
+
   state.size = state._size_copy = POLL_PRE_SIZE;
   state.changed = false;
 
@@ -124,12 +128,11 @@ static int init_sockets_state(int server_socket) {
     return error;
   }
 
-  state.polls_count = state._polls_count_copy = 1;
+  state.polls_count = state._polls_count_copy = 2;
   state.polls[0].fd = state._polls_copy[0].fd = server_socket;
   state.polls[0].events = state._polls_copy[0].events = POLLIN | POLLPRI;
-
-  // Ignore, but interrupt poll syscall
-  signal(SIGUSR2, &empty_handler);
+  state.polls[1].fd = state._polls_copy[1].fd = pipes[0];
+  state.polls[1].events = state._polls_copy[1].events = POLLIN | POLLPRI;
 
   return 0;
 }
@@ -188,8 +191,9 @@ static bool copy_state() {
  * @return {@code true} if success.
  */
 static bool handle_polls_update(size_t count) {
-  int revents;
-  int socket;
+  int revents, socket;
+  char buffer[BUFFER_SIZE];
+  ssize_t result;
 
   for (size_t i = 0; i < state._polls_count_copy; i++) {
     if (count == 0)
@@ -213,6 +217,23 @@ static bool handle_polls_update(size_t count) {
       } else {
         fprintf(stderr, "Cannot accept new clients\n");
         close(state._polls_copy[0].fd);
+        return false;
+      }
+      continue;
+    }
+
+    // Handle signal pipe
+    if (i == 1) {
+      if (revents & POLLPRI || revents & POLLIN) {
+        result = read(state._polls_copy[1].fd, buffer, BUFFER_SIZE);
+        if (result < 0) {
+          perror("Cannot handle signal pipe");
+          close(state._polls_copy[1].fd);
+          return false;
+        }
+      } else {
+        fprintf(stderr, "Cannot handle signal pipe\n");
+        close(state._polls_copy[1].fd);
         return false;
       }
       continue;
@@ -279,6 +300,14 @@ int sockets_poll_loop(int server_socket) {
   }
 
 #define UNLOCK_POLLS() pthread_mutex_unlock(&state.lock);
+
+#define NOTIFY_HANDLER()                       \
+  {                                            \
+    if (write(state.signal_pipe, "", 1) < 0) { \
+      perror("Cannot send signal to pipe");    \
+      return false;                            \
+    }                                          \
+  }
 
 bool sockets_add_socket(int socket,
                         void (*callback)(int, int, void*),
@@ -351,7 +380,7 @@ bool sockets_enable_in_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -369,7 +398,7 @@ bool sockets_enable_out_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -387,7 +416,7 @@ bool sockets_enable_io_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -405,7 +434,7 @@ bool sockets_cancel_in_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -423,7 +452,7 @@ bool sockets_cancel_out_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -440,7 +469,7 @@ bool sockets_cancel_io_handle(int socket) {
 
   UNLOCK_POLLS();
 
-  pthread_kill(state.main_thread, SIGUSR2);
+  NOTIFY_HANDLER();
   return true;
 }
 
@@ -459,8 +488,8 @@ static void remove_socket_at(size_t pos) {
 bool sockets_remove_socket(int socket) {
   LOCK_POLLS();
 
-  // Pre kill for closing sockets
-  pthread_kill(state.main_thread, SIGUSR2);
+  // Pre notify for closing sockets
+  NOTIFY_HANDLER();
 
   ssize_t pos = find_socket(socket);
   if (pos == -1) {
@@ -479,5 +508,6 @@ bool sockets_remove_socket(int socket) {
   return true;
 }
 
-#undef LOCK_POLLS
+#undef NOTIFY_HANDLER
 #undef UNLOCK_POLLS
+#undef LOCK_POLLS

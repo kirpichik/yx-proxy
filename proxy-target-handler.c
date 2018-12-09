@@ -1,6 +1,5 @@
 
 #include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,12 +87,6 @@ static void target_cleanup(target_state_t* state) {
 
 static bool target_init(target_state_t* state) {
   int error;
-
-  // Block SIGUSR2
-  sigset_t signals;
-  sigemptyset(&signals);
-  sigaddset(&signals, SIGUSR2);
-  pthread_sigmask(SIG_BLOCK, &signals, NULL);
 
   if (!sockets_add_socket(state->socket, &target_handler, state)) {
     cache_entry_mark_invalid_and_finished(state->cache);
